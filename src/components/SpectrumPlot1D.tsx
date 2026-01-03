@@ -17,12 +17,40 @@ interface SpectrumPlot1DProps {
 export default function SpectrumPlot1D({ spectra }: SpectrumPlot1DProps) {
   if (spectra.length === 0) return null;
 
-  // Merge all spectra into a single dataset
-  const data = spectra[0].xData.map((x, i) => {
-    const point: Record<string, number> = { x };
-    spectra.forEach((spectrum, idx) => {
-      point[`real_${idx}`] = spectrum.realData[i];
-      point[`imag_${idx}`] = spectrum.imagData[i];
+  const precision = 6;
+  const keyFor = (x: number) =>
+    Number.isFinite(x) ? x.toFixed(precision) : `${x}`;
+
+  // Build per-spectrum maps to handle different x grids
+  const pointMaps = spectra.map(spectrum => {
+    const map = new Map<
+      string,
+      { x: number; real: number; imag: number }
+    >();
+    spectrum.xData.forEach((x, idx) => {
+      map.set(keyFor(x), {
+        x,
+        real: spectrum.realData[idx] ?? 0,
+        imag: spectrum.imagData[idx] ?? 0,
+      });
+    });
+    return map;
+  });
+
+  // Union of all x positions
+  const allKeys = Array.from(
+    new Set(pointMaps.flatMap(m => Array.from(m.keys()))),
+  ).sort((a, b) => parseFloat(a) - parseFloat(b));
+
+  const data = allKeys.map(key => {
+    const x = parseFloat(key);
+    const point: Record<string, number | undefined> = { x };
+    pointMaps.forEach((map, idx) => {
+      const entry = map.get(key);
+      if (entry) {
+        point[`real_${idx}`] = entry.real;
+        point[`imag_${idx}`] = entry.imag;
+      }
     });
     return point;
   });
@@ -35,6 +63,9 @@ export default function SpectrumPlot1D({ spectra }: SpectrumPlot1DProps) {
     'hsl(var(--chart-5))',
   ];
 
+  const xLabel = spectra.length === 1 ? spectra[0].xLabel : 'X Axis';
+  const yLabel = spectra.length === 1 ? spectra[0].yLabel : 'Intensity (a.u.)';
+
   return (
     <div className="w-full h-[400px] bg-card/50 rounded-lg p-4 border border-border/50">
       <ResponsiveContainer width="100%" height="100%">
@@ -46,7 +77,7 @@ export default function SpectrumPlot1D({ spectra }: SpectrumPlot1DProps) {
             fontSize={12}
             tickLine={false}
             label={{
-              value: spectra[0].xLabel,
+              value: xLabel,
               position: 'bottom',
               offset: 20,
               fill: 'hsl(var(--muted-foreground))',
@@ -58,7 +89,7 @@ export default function SpectrumPlot1D({ spectra }: SpectrumPlot1DProps) {
             fontSize={12}
             tickLine={false}
             label={{
-              value: spectra[0].yLabel,
+              value: yLabel,
               angle: -90,
               position: 'insideLeft',
               fill: 'hsl(var(--muted-foreground))',

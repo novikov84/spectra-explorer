@@ -1,4 +1,4 @@
-// Mock API for EPR spectrum viewer
+import JSZip from 'jszip';
 
 export type SpectrumType = 'CW' | 'EDFS' | 'T1' | 'T2' | 'Rabi' | 'HYSCORE' | '2D' | 'Unknown';
 
@@ -38,126 +38,484 @@ export interface Spectrum2D {
   zData: number[][];
 }
 
-// Generate mock 1D spectrum data
-function generateMock1DData(type: SpectrumType): { xData: number[]; realData: number[]; imagData: number[] } {
-  const points = 512;
+type StoredSample = {
+  sample: Sample;
+  files: SpectrumFile[];
+  spectra: Map<string, Spectrum1D | Spectrum2D>;
+  processed: Set<string>;
+};
+
+// In-memory storage to mimic API behaviour
+const sampleStore = new Map<string, StoredSample>();
+let sampleList: Sample[] = [];
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const uid = (prefix: string) =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? (crypto as Crypto).randomUUID()
+    : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const parseCsv = (text: string): number[][] => {
+  return text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line =>
+      line
+        .split(',')
+        .map(part => Number(part.trim()))
+        .filter(n => Number.isFinite(n)),
+    )
+    .filter(row => row.length > 0);
+};
+
+const readTextIfExists = async (zip: JSZip, path: string): Promise<string | null> => {
+  const file = zip.file(path);
+  if (!file) return null;
+  return file.async('string');
+};
+
+const buildAxis = (values: number[] | null, points?: number): number[] | null => {
+  if (values && values.length > 0) {
+    if (points && points > 0 && values.length !== points) {
+      return Array.from({ length: points }, (_, i) => i);
+    }
+    return values;
+  }
+  if (points && points > 0) {
+    return Array.from({ length: points }, (_, i) => i);
+  }
+  return null;
+};
+
+const axisLabel = (axis: any, fallback: string): string => {
+  if (!axis) return fallback;
+  const name = axis.name || fallback;
+  const unit = axis.unit ? ` (${axis.unit})` : '';
+  return `${name}${unit}`;
+};
+
+const inferSpectrumType = (datasetName: string, metadata: any, is2D: boolean): SpectrumType => {
+  const name = (datasetName || '').toLowerCase();
+  if (name.includes('edfs')) return 'EDFS';
+  if (name.includes('rabi')) return 'Rabi';
+  if (name.includes('t1')) return 'T1';
+  if (name.includes('t2')) return 'T2';
+  if (name.includes('hyscore')) return 'HYSCORE';
+  if (name.includes('2d')) return '2D';
+  if (name.includes('cw')) return 'CW';
+
+  const family = metadata?.classification?.experiment_family || '';
+  if (family.includes('CW')) return is2D ? '2D' : 'CW';
+  if (family.includes('PULSED')) return is2D ? '2D' : 'T1';
+
+  return is2D ? '2D' : 'Unknown';
+};
+
+const toFolder = (path: string): string => {
+  const clean = path.replace(/\\/g, '/');
+  const idx = clean.lastIndexOf('/');
+  return idx === -1 ? '' : clean.slice(0, idx);
+};
+
+async function readAxisCsv(zip: JSZip, folder: string, axisName: string, points?: number) {
+  const prefix = folder ? folder.replace(/\/?$/, '/') : '';
+  const txt = await readTextIfExists(zip, `${prefix}axes_${axisName}.csv`);
+  if (!txt) return buildAxis(null, points);
+  const rows = parseCsv(txt);
+  const values = rows.flat();
+  return buildAxis(values, points);
+}
+
+function build1DFromCsv(rows: number[][]) {
   const xData: number[] = [];
   const realData: number[] = [];
   const imagData: number[] = [];
 
-  for (let i = 0; i < points; i++) {
-    const x = (i / points) * 100;
-    xData.push(x);
-
-    let real = 0;
-    let imag = 0;
-
-    switch (type) {
-      case 'CW':
-        // Derivative Lorentzian
-        const center = 50;
-        const width = 5;
-        const t = (x - center) / width;
-        real = -2 * t / (1 + t * t) ** 2;
-        imag = (1 - t * t) / (1 + t * t) ** 2;
-        break;
-      case 'EDFS':
-        // Echo decay
-        real = Math.exp(-x / 30) * Math.cos(x * 0.5);
-        imag = Math.exp(-x / 30) * Math.sin(x * 0.5);
-        break;
-      case 'T1':
-        // Inversion recovery
-        real = 1 - 2 * Math.exp(-x / 20);
-        imag = 0.1 * Math.sin(x * 0.1);
-        break;
-      case 'T2':
-        // Spin echo decay
-        real = Math.exp(-Math.pow(x / 25, 2));
-        imag = 0.05 * Math.exp(-Math.pow(x / 25, 2)) * Math.sin(x * 0.2);
-        break;
-      case 'Rabi':
-        // Rabi oscillation
-        real = Math.cos(x * 0.3) * Math.exp(-x / 50);
-        imag = Math.sin(x * 0.3) * Math.exp(-x / 50);
-        break;
-      default:
-        real = Math.sin(x * 0.1) * Math.exp(-x / 40) + (Math.random() - 0.5) * 0.1;
-        imag = Math.cos(x * 0.1) * Math.exp(-x / 40) + (Math.random() - 0.5) * 0.1;
+  rows.forEach((row, idx) => {
+    if (row.length === 1) {
+      xData.push(idx);
+      realData.push(row[0]);
+      imagData.push(0);
+    } else if (row.length === 2) {
+      xData.push(row[0]);
+      realData.push(row[1]);
+      imagData.push(0);
+    } else {
+      xData.push(row[0]);
+      realData.push(row[1]);
+      imagData.push(row[2] ?? 0);
     }
-
-    // Add some noise
-    real += (Math.random() - 0.5) * 0.02;
-    imag += (Math.random() - 0.5) * 0.02;
-
-    realData.push(real);
-    imagData.push(imag);
-  }
+  });
 
   return { xData, realData, imagData };
 }
 
-// Generate mock 2D spectrum data
-function generateMock2DData(type: SpectrumType): { xData: number[]; yData: number[]; zData: number[][] } {
-  const xPoints = 64;
-  const yPoints = 64;
-  const xData: number[] = [];
-  const yData: number[] = [];
-  const zData: number[][] = [];
+async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any) {
+  const datasetName =
+    metadata?.dataset_header?.dataset_name ||
+    folder.split('/').filter(Boolean).pop() ||
+    'dataset';
+  const prefix = folder ? `${folder}/` : '';
 
-  for (let i = 0; i < xPoints; i++) {
-    xData.push((i / xPoints) * 20 - 10);
-  }
-  for (let j = 0; j < yPoints; j++) {
-    yData.push((j / yPoints) * 20 - 10);
-  }
+  const axisList = Array.isArray(metadata?.axes) ? metadata.axes : [];
+  const xAxisMeta =
+    axisList.find((ax: any) => (ax.axis_id || '').toUpperCase() === 'X') || axisList[0];
+  const yAxisMeta =
+    axisList.find((ax: any) => (ax.axis_id || '').toUpperCase() === 'Y') || axisList[1];
 
-  for (let j = 0; j < yPoints; j++) {
-    const row: number[] = [];
-    for (let i = 0; i < xPoints; i++) {
-      const x = xData[i];
-      const y = yData[j];
-      let z = 0;
+  const xAxis = await readAxisCsv(zip, prefix, 'x', xAxisMeta?.points);
+  const yAxis = await readAxisCsv(zip, prefix, 'y', yAxisMeta?.points);
 
-      if (type === 'HYSCORE') {
-        // HYSCORE pattern with ridges
-        const r1 = Math.sqrt((x - 3) ** 2 + (y - 3) ** 2);
-        const r2 = Math.sqrt((x + 3) ** 2 + (y + 3) ** 2);
-        const r3 = Math.sqrt((x - 3) ** 2 + (y + 3) ** 2);
-        const r4 = Math.sqrt((x + 3) ** 2 + (y - 3) ** 2);
-        z = Math.exp(-Math.pow(r1, 2) / 4) + Math.exp(-Math.pow(r2, 2) / 4);
-        z += 0.5 * Math.exp(-Math.pow(r3, 2) / 6) + 0.5 * Math.exp(-Math.pow(r4, 2) / 6);
-        // Add diagonal ridge
-        z += 0.3 * Math.exp(-((x - y) ** 2) / 2);
-      } else {
-        // Generic 2D pattern
-        z = Math.exp(-(x ** 2 + y ** 2) / 20) * Math.cos(Math.sqrt(x ** 2 + y ** 2) * 0.5);
-        z += 0.3 * Math.exp(-((x - 4) ** 2 + (y - 2) ** 2) / 8);
-        z += 0.2 * Math.exp(-((x + 3) ** 2 + (y + 4) ** 2) / 10);
-      }
-
-      // Add noise
-      z += (Math.random() - 0.5) * 0.05;
-      row.push(z);
-    }
-    zData.push(row);
+  // 1D path first (data.csv)
+  const dataCsv = await readTextIfExists(zip, `${prefix}data.csv`);
+  if (dataCsv) {
+    const rows = parseCsv(dataCsv);
+    const { xData, realData, imagData } = build1DFromCsv(rows);
+    const resolvedX = xAxis && xAxis.length === realData.length ? xAxis : xData;
+    const spectrum: Spectrum1D = {
+      id: '',
+      filename: datasetName,
+      type: inferSpectrumType(datasetName, metadata, false),
+      xLabel: axisLabel(xAxisMeta, 'X'),
+      yLabel: 'Intensity (a.u.)',
+      xData: resolvedX,
+      realData,
+      imagData,
+    };
+    return { spectrum, is2D: false };
   }
 
-  return { xData, yData, zData };
+  // Matrix path
+  const realTxt = await readTextIfExists(zip, `${prefix}data_real.csv`);
+  if (!realTxt) {
+    throw new Error(`No data.csv or data_real.csv found in ${folder}`);
+  }
+  const realMatrix = parseCsv(realTxt);
+  if (realMatrix.length === 0) {
+    throw new Error(`Empty data in ${folder}`);
+  }
+
+  const looks2D =
+    (yAxisMeta && (yAxisMeta.points || 0) > 1) ||
+    (realMatrix.length > 1 && realMatrix[0].length > 2);
+
+  if (!looks2D && realMatrix[0].length <= 2) {
+    // Treat as 1D (x, real)
+    const { xData, realData, imagData } = build1DFromCsv(realMatrix);
+    const resolvedX = xAxis && xAxis.length === realData.length ? xAxis : xData;
+    const spectrum: Spectrum1D = {
+      id: '',
+      filename: datasetName,
+      type: inferSpectrumType(datasetName, metadata, false),
+      xLabel: axisLabel(xAxisMeta, 'X'),
+      yLabel: 'Intensity (a.u.)',
+      xData: resolvedX,
+      realData,
+      imagData,
+    };
+    return { spectrum, is2D: false };
+  }
+
+  const xPoints = realMatrix[0]?.length || 0;
+  const yPoints = realMatrix.length;
+  const xData = buildAxis(xAxis, xPoints) || [];
+  const yData = buildAxis(yAxis, yPoints) || [];
+
+  const spectrum: Spectrum2D = {
+    id: '',
+    filename: datasetName,
+    type: inferSpectrumType(datasetName, metadata, true),
+    xLabel: axisLabel(xAxisMeta, 'X'),
+    yLabel: axisLabel(yAxisMeta, 'Y'),
+    xData,
+    yData,
+    zData: realMatrix,
+  };
+
+  return { spectrum, is2D: true };
 }
 
-// Mock samples storage
-let mockSamples: Sample[] = [];
-let mockFiles: Map<string, SpectrumFile[]> = new Map();
-let mockSpectra: Map<string, Spectrum1D | Spectrum2D> = new Map();
+async function parseZipArchive(file: File | Blob) {
+  console.info('[mockApi] parseZipArchive: start');
+  const zip = await JSZip.loadAsync(file);
+  const metaEntries = zip
+    .file(/metadata\.json$/i)
+    .filter(entry => !entry.name.toLowerCase().endsWith('metadata_dsc_raw.json'));
 
-// Simulate API delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  if (metaEntries.length === 0) {
+    console.info('[mockApi] parseZipArchive: no metadata.json found, falling back to raw BES3T parse');
+    return parseRawBes3t(zip);
+  }
+
+  console.info(`[mockApi] parseZipArchive: found ${metaEntries.length} metadata.json file(s)`);
+
+  const files: SpectrumFile[] = [];
+  const spectra = new Map<string, Spectrum1D | Spectrum2D>();
+
+  const sortedEntries = [...metaEntries].sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of sortedEntries) {
+    const folder = toFolder(entry.name);
+    try {
+      const metadata = JSON.parse(await entry.async('string'));
+      const { spectrum } = await parseSpectrumFromFolder(zip, folder, metadata);
+      const id = uid('file');
+      const file: SpectrumFile = {
+        id,
+        filename: metadata?.dataset_header?.dataset_name || spectrum.filename,
+        type: spectrum.type,
+        selected: true,
+      };
+
+      spectrum.id = id;
+      spectra.set(id, spectrum);
+      files.push(file);
+    } catch (err) {
+      console.warn(`Skipping ${folder}:`, err);
+    }
+  }
+
+  if (files.length === 0) {
+    throw new Error('Archive parsed, but no spectra were recognized.');
+  }
+
+  return { files, spectra };
+}
+
+async function loadExampleZip(): Promise<File> {
+  const response = await fetch('/Export.zip');
+  if (!response.ok) {
+    throw new Error('Example archive /Export.zip not found. Please place it in /public.');
+  }
+  const blob = await response.blob();
+  return new File([blob], 'Export.zip', { type: 'application/zip' });
+}
+
+type AxisGuess = { name: string; unit: string; points: number; min?: number; width?: number; start?: number; stop?: number };
+
+function parseDscText(text: string): Record<string, string> {
+  const meta: Record<string, string> = {};
+  text.split(/\r?\n/).forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('*')) return;
+
+    // "=" separated
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = trimmed.slice(0, eqIdx).trim().toUpperCase();
+      const value = trimmed.slice(eqIdx + 1).trim();
+      if (key) meta[key] = value;
+      return;
+    }
+
+    // Whitespace separated (tab or spaces)
+    const parts = trimmed.split(/\s+/, 2);
+    if (parts.length === 2) {
+      const [k, v] = parts;
+      if (k) {
+        meta[k.trim().toUpperCase()] = v.trim();
+      }
+    }
+  });
+  return meta;
+}
+
+const getInt = (meta: Record<string, string>, key: string, fallback = 0) => {
+  const v = meta[key.toUpperCase()];
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+};
+
+const getFloat = (meta: Record<string, string>, key: string, fallback?: number) => {
+  const v = meta[key.toUpperCase()];
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const getStr = (meta: Record<string, string>, key: string, fallback = '') => {
+  const v = meta[key.toUpperCase()];
+  return v !== undefined ? v : fallback;
+};
+
+const endianFromBseq = (meta: Record<string, string>) => {
+  const bseq = getStr(meta, 'BSEQ', '').toUpperCase();
+  if (bseq.startsWith('BIG')) return 'BE';
+  if (bseq.startsWith('LIT') || bseq.startsWith('LITTLE')) return 'LE';
+  return 'LE';
+};
+
+const dtypeFromIrfmt = (irfmt: string) => {
+  const code = (irfmt || '').trim().toUpperCase();
+  if (code === 'D') return { size: 8, reader: 'f64' as const };
+  if (code === 'I') return { size: 4, reader: 'i32' as const };
+  return { size: 4, reader: 'f32' as const };
+};
+
+const isComplex = (meta: Record<string, string>) => {
+  const ikkf = getStr(meta, 'IKKF', '').toUpperCase();
+  if (ikkf.includes('CPLX')) return true;
+  if ('IIFMT' in meta) return true;
+  return false;
+};
+
+const axisGuess = (meta: Record<string, string>, axis: 'X' | 'Y', points: number): AxisGuess => {
+  const name = getStr(meta, `${axis}NAM`, '');
+  const unit = getStr(meta, `${axis}UNI`, '');
+  const min = getFloat(meta, `${axis}MIN`);
+  const width = getFloat(meta, `${axis}WID`);
+  const start = getFloat(meta, `${axis}STRT`);
+  const stop = getFloat(meta, `${axis}STOP`);
+  return { name, unit, points, min, width, start, stop };
+};
+
+const axisVector = (ax: AxisGuess) => {
+  if (Number.isFinite(ax.min) && Number.isFinite(ax.width)) {
+    return Array.from({ length: ax.points }, (_, i) => (ax.min as number) + ((ax.width as number) * i) / (ax.points - 1 || 1));
+  }
+  if (Number.isFinite(ax.start) && Number.isFinite(ax.stop)) {
+    return Array.from({ length: ax.points }, (_, i) => {
+      const t = ax.points === 1 ? 0 : i / (ax.points - 1);
+      return (ax.start as number) + t * ((ax.stop as number) - (ax.start as number));
+    });
+  }
+  return Array.from({ length: ax.points }, (_, i) => i);
+};
+
+const readBinary = (buffer: ArrayBuffer, dtype: { size: number; reader: 'f32' | 'f64' | 'i32' }, endian: 'LE' | 'BE') => {
+  const view = new DataView(buffer);
+  const length = buffer.byteLength / dtype.size;
+  const out: number[] = [];
+  for (let i = 0; i < length; i++) {
+    const offset = i * dtype.size;
+    if (dtype.reader === 'f32') out.push(view.getFloat32(offset, endian === 'LE'));
+    else if (dtype.reader === 'f64') out.push(view.getFloat64(offset, endian === 'LE'));
+    else out.push(view.getInt32(offset, endian === 'LE'));
+  }
+  return out;
+};
+
+async function parseRawBes3t(zip: JSZip) {
+  console.info('[mockApi] parseRawBes3t: scanning for .DSC');
+  const dscEntries = zip.file(/\.dsc$/i);
+  if (!dscEntries.length) throw new Error('No metadata.json files and no .dsc files found in archive.');
+
+  const files: SpectrumFile[] = [];
+  const spectra = new Map<string, Spectrum1D | Spectrum2D>();
+
+  const dtaLookup = (dir: string, base: string) => {
+    const dirPrefix = dir ? `${dir.replace(/\\/g, '/')}/` : '';
+    const candidates = zip
+      .file(/\.dta$/i)
+      .filter(f => f.name.toLowerCase().endsWith(`${base.toLowerCase()}.dta`) && toFolder(f.name) === dir);
+    if (candidates.length > 0) return candidates[0];
+    // last resort: any file with same basename
+    return zip
+      .file(/\.dta$/i)
+      .find(f => f.name.toLowerCase().endsWith(`${base.toLowerCase()}.dta`));
+  };
+
+  for (const entry of dscEntries.sort((a, b) => a.name.localeCompare(b.name))) {
+    try {
+      const dscText = await entry.async('string');
+      const meta = parseDscText(dscText);
+      const dir = toFolder(entry.name);
+      const base = entry.name.split('/').pop()?.replace(/\.dsc$/i, '') || 'dataset';
+      const dtaEntry = dtaLookup(dir, base);
+      if (!dtaEntry) {
+        console.warn(`[mockApi] No DTA found for ${entry.name}`);
+        continue;
+      }
+
+      const xpts = getInt(meta, 'XPTS', 0);
+      const ypts = getInt(meta, 'YPTS', 1);
+      if (xpts <= 0) {
+        console.warn(`[mockApi] Invalid XPTS for ${entry.name}`);
+        continue;
+      }
+
+      const endian = endianFromBseq(meta);
+      const dtype = dtypeFromIrfmt(getStr(meta, 'IRFMT', 'F'));
+      const complexFlag = isComplex(meta);
+      const npts = xpts * ypts;
+
+      const buffer = await dtaEntry.async('arraybuffer');
+      const numbers = readBinary(buffer, dtype, endian as 'LE' | 'BE');
+      const expected = npts * (complexFlag ? 2 : 1);
+      if (numbers.length !== expected) {
+        console.warn(`[mockApi] Size mismatch for ${entry.name}: expected ${expected}, got ${numbers.length}`);
+        continue;
+      }
+
+      const real: number[] = [];
+      const imag: number[] = [];
+      if (complexFlag) {
+        for (let i = 0; i < npts; i++) {
+          real.push(numbers[i * 2]);
+          imag.push(numbers[i * 2 + 1]);
+        }
+      } else {
+        real.push(...numbers);
+        imag.push(...Array.from({ length: npts }, () => 0));
+      }
+
+      const xAxisMeta = axisGuess(meta, 'X', xpts);
+      const yAxisMeta = axisGuess(meta, 'Y', ypts > 0 ? ypts : 1);
+      const xVector = axisVector(xAxisMeta);
+      const yVector = ypts > 1 ? axisVector(yAxisMeta) : null;
+
+      const id = uid('file');
+      const filename = getStr(meta, 'TITL', `${base}.dsc`);
+      const type = inferSpectrumType(filename, { classification: { experiment_family: getStr(meta, 'EXPT', '') } }, ypts > 1);
+
+      if (ypts > 1) {
+        const zData: number[][] = [];
+        for (let row = 0; row < ypts; row++) {
+          const start = row * xpts;
+          zData.push(real.slice(start, start + xpts));
+        }
+        const spectrum: Spectrum2D = {
+          id,
+          filename,
+          type,
+          xLabel: axisLabel(xAxisMeta, 'X'),
+          yLabel: axisLabel(yAxisMeta, 'Y'),
+          xData: xVector,
+          yData: yVector || Array.from({ length: ypts }, (_, i) => i),
+          zData,
+        };
+        files.push({ id, filename, type, selected: true });
+        spectra.set(id, spectrum);
+      } else {
+        const spectrum: Spectrum1D = {
+          id,
+          filename,
+          type,
+          xLabel: axisLabel(xAxisMeta, 'X'),
+          yLabel: 'Intensity (a.u.)',
+          xData: xVector,
+          realData: real,
+          imagData: imag,
+        };
+        files.push({ id, filename, type, selected: true });
+        spectra.set(id, spectrum);
+      }
+    } catch (err) {
+      console.warn(`[mockApi] Failed to parse ${entry.name}:`, err);
+    }
+  }
+
+  if (!files.length) throw new Error('Archive parsed, but no spectra were recognized.');
+  return { files, spectra };
+}
 
 export const mockApi = {
   // Authentication
   async login(email: string, password: string): Promise<{ success: boolean; error?: string }> {
-    await delay(800);
+    await delay(400);
     if (email && password.length >= 4) {
       return { success: true };
     }
@@ -166,158 +524,83 @@ export const mockApi = {
 
   // Samples
   async getSamples(): Promise<Sample[]> {
-    await delay(300);
-    return mockSamples;
+    await delay(200);
+    return sampleList;
   },
 
   async uploadSample(file: File): Promise<Sample> {
-    await delay(1500);
+    await delay(300);
+    console.info(`[mockApi] uploadSample: parsing ${file.name}`);
+    const parsed = await parseZipArchive(file);
+    console.info(`[mockApi] uploadSample: parsed ${parsed.files.length} file(s)`);
     const sample: Sample = {
-      id: `sample-${Date.now()}`,
-      name: file.name.replace('.zip', ''),
+      id: uid('sample'),
+      name: file.name.replace(/\.zip$/i, ''),
       uploadDate: new Date().toISOString(),
-      fileCount: Math.floor(Math.random() * 10) + 5,
+      fileCount: parsed.files.length,
     };
-    mockSamples.push(sample);
 
-    // Generate mock files for this sample
-    const types: SpectrumType[] = ['CW', 'EDFS', 'T1', 'T2', 'Rabi', 'HYSCORE', '2D', 'Unknown'];
-    const files: SpectrumFile[] = [];
-    for (let i = 0; i < sample.fileCount; i++) {
-      const type = types[Math.floor(Math.random() * types.length)];
-      files.push({
-        id: `file-${sample.id}-${i}`,
-        filename: `spectrum_${type.toLowerCase()}_${i + 1}.dat`,
-        type,
-        selected: true,
-      });
-    }
-    mockFiles.set(sample.id, files);
+    sampleList = [...sampleList, sample];
+    sampleStore.set(sample.id, {
+      sample,
+      files: parsed.files,
+      spectra: parsed.spectra,
+      processed: new Set(parsed.files.filter(f => f.selected).map(f => f.id)),
+    });
 
     return sample;
   },
 
   async loadExampleSample(): Promise<Sample> {
-    await delay(1000);
-    const sample: Sample = {
-      id: `example-${Date.now()}`,
-      name: 'Example Dataset',
-      uploadDate: new Date().toISOString(),
-      fileCount: 12,
-    };
-    mockSamples.push(sample);
-
-    // Generate comprehensive example files
-    const exampleFiles: SpectrumFile[] = [
-      { id: `file-${sample.id}-0`, filename: 'cw_nitroxide_rt.dat', type: 'CW', selected: true },
-      { id: `file-${sample.id}-1`, filename: 'cw_nitroxide_77k.dat', type: 'CW', selected: true },
-      { id: `file-${sample.id}-2`, filename: 'edfs_fid.dat', type: 'EDFS', selected: true },
-      { id: `file-${sample.id}-3`, filename: 'edfs_echo.dat', type: 'EDFS', selected: true },
-      { id: `file-${sample.id}-4`, filename: 't1_invrec.dat', type: 'T1', selected: true },
-      { id: `file-${sample.id}-5`, filename: 't2_hahn.dat', type: 'T2', selected: true },
-      { id: `file-${sample.id}-6`, filename: 't2_cpmg.dat', type: 'T2', selected: true },
-      { id: `file-${sample.id}-7`, filename: 'rabi_nutation.dat', type: 'Rabi', selected: true },
-      { id: `file-${sample.id}-8`, filename: 'hyscore_14n.dat', type: 'HYSCORE', selected: true },
-      { id: `file-${sample.id}-9`, filename: 'hyscore_1h.dat', type: 'HYSCORE', selected: true },
-      { id: `file-${sample.id}-10`, filename: '2d_eldor.dat', type: '2D', selected: true },
-      { id: `file-${sample.id}-11`, filename: 'unknown_exp.dat', type: 'Unknown', selected: true },
-    ];
-    mockFiles.set(sample.id, exampleFiles);
-
-    return sample;
+    await delay(300);
+    console.info('[mockApi] loadExampleSample: fetching /Export.zip');
+    const file = await loadExampleZip();
+    return this.uploadSample(file);
   },
 
   async deleteSample(sampleId: string): Promise<void> {
-    await delay(300);
-    mockSamples = mockSamples.filter(s => s.id !== sampleId);
-    mockFiles.delete(sampleId);
+    await delay(150);
+    sampleList = sampleList.filter(s => s.id !== sampleId);
+    sampleStore.delete(sampleId);
   },
 
   // Archive contents
   async getArchiveFiles(sampleId: string): Promise<SpectrumFile[]> {
-    await delay(400);
-    return mockFiles.get(sampleId) || [];
+    await delay(200);
+    const stored = sampleStore.get(sampleId);
+    return stored ? stored.files.map(f => ({ ...f })) : [];
   },
 
   async updateFileSelection(sampleId: string, fileId: string, selected: boolean): Promise<void> {
-    const files = mockFiles.get(sampleId);
-    if (files) {
-      const file = files.find(f => f.id === fileId);
-      if (file) {
-        file.selected = selected;
-      }
-    }
+    const stored = sampleStore.get(sampleId);
+    if (!stored) return;
+    stored.files = stored.files.map(f => (f.id === fileId ? { ...f, selected } : f));
   },
 
   // Processing
   async processFiles(sampleId: string, fileIds: string[]): Promise<void> {
-    await delay(2000);
-
-    const files = mockFiles.get(sampleId) || [];
-    const selectedFiles = files.filter(f => fileIds.includes(f.id));
-
-    for (const file of selectedFiles) {
-      const is2D = file.type === 'HYSCORE' || file.type === '2D';
-
-      if (is2D) {
-        const data = generateMock2DData(file.type);
-        const spectrum: Spectrum2D = {
-          id: file.id,
-          filename: file.filename,
-          type: file.type,
-          xLabel: file.type === 'HYSCORE' ? 'ν₁ (MHz)' : 'τ₁ (μs)',
-          yLabel: file.type === 'HYSCORE' ? 'ν₂ (MHz)' : 'τ₂ (μs)',
-          ...data,
-        };
-        mockSpectra.set(file.id, spectrum);
-      } else {
-        const data = generateMock1DData(file.type);
-        const spectrum: Spectrum1D = {
-          id: file.id,
-          filename: file.filename,
-          type: file.type,
-          xLabel: getXLabel(file.type),
-          yLabel: 'Intensity (a.u.)',
-          ...data,
-        };
-        mockSpectra.set(file.id, spectrum);
-      }
-    }
+    await delay(400);
+    const stored = sampleStore.get(sampleId);
+    if (!stored) return;
+    stored.processed = new Set(fileIds);
+    stored.files = stored.files.map(f => ({ ...f, selected: fileIds.includes(f.id) }));
   },
 
   // Viewer
   async getProcessedSpectra(sampleId: string): Promise<(Spectrum1D | Spectrum2D)[]> {
-    await delay(300);
-    const files = mockFiles.get(sampleId) || [];
+    await delay(200);
+    const stored = sampleStore.get(sampleId);
+    if (!stored) return [];
     const spectra: (Spectrum1D | Spectrum2D)[] = [];
-
-    for (const file of files) {
-      const spectrum = mockSpectra.get(file.id);
+    for (const id of stored.processed) {
+      const spectrum = stored.spectra.get(id);
       if (spectrum) {
         spectra.push(spectrum);
       }
     }
-
     return spectra;
   },
 };
-
-function getXLabel(type: SpectrumType): string {
-  switch (type) {
-    case 'CW':
-      return 'Magnetic Field (mT)';
-    case 'EDFS':
-      return 'Magnetic Field (mT)';
-    case 'T1':
-      return 'Recovery Time (μs)';
-    case 'T2':
-      return 'Echo Time (μs)';
-    case 'Rabi':
-      return 'Pulse Length (ns)';
-    default:
-      return 'X';
-  }
-}
 
 export function is2DSpectrum(spectrum: Spectrum1D | Spectrum2D): spectrum is Spectrum2D {
   return 'zData' in spectrum;

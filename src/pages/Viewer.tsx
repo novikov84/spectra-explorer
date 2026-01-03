@@ -14,6 +14,7 @@ import { ArrowLeft, Loader2, LineChart, Trash2, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
 import SpectrumPlot1D from '@/components/SpectrumPlot1D';
 import SpectrumPlot2D from '@/components/SpectrumPlot2D';
+import SpectrumPlot2DSlices from '@/components/SpectrumPlot2DSlices';
 
 const spectrumGroups: SpectrumType[] = ['CW', 'EDFS', 'T1', 'T2', 'Rabi', 'HYSCORE', '2D', 'Unknown'];
 
@@ -24,6 +25,7 @@ export default function Viewer() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [plottedSpectra, setPlottedSpectra] = useState<(Spectrum1D | Spectrum2D)[]>([]);
+  const [twoDMode, setTwoDMode] = useState<'heatmap' | 'slices'>('heatmap');
 
   useEffect(() => {
     if (sampleId) {
@@ -219,12 +221,34 @@ export default function Viewer() {
                   {plotted2D.length > 0 && (
                     <Card className="border-border/50">
                       <CardHeader>
-                        <CardTitle className="text-lg">2D Spectra</CardTitle>
+                        <div className="flex items-center justify-between gap-4">
+                          <CardTitle className="text-lg">2D Spectra</CardTitle>
+                          <div className="flex gap-2">
+                            <Button
+                              variant={twoDMode === 'heatmap' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTwoDMode('heatmap')}
+                            >
+                              Heatmap
+                            </Button>
+                            <Button
+                              variant={twoDMode === 'slices' ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setTwoDMode('slices')}
+                            >
+                              1D Slices
+                            </Button>
+                          </div>
+                        </div>
                       </CardHeader>
                       <CardContent className="space-y-6">
-                        {plotted2D.map((spectrum) => (
-                          <SpectrumPlot2D key={spectrum.id} spectrum={spectrum} />
-                        ))}
+                        {twoDMode === 'heatmap'
+                          ? plotted2D.map((spectrum) => (
+                              <SpectrumPlot2D key={spectrum.id} spectrum={spectrum} />
+                            ))
+                          : plotted2D.map((spectrum) => (
+                              <SpectrumPlot2DSlices key={spectrum.id} spectrum={spectrum} />
+                            ))}
                       </CardContent>
                     </Card>
                   )}
