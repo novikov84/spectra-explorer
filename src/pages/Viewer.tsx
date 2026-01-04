@@ -26,6 +26,8 @@ export default function Viewer() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [plottedSpectra, setPlottedSpectra] = useState<(Spectrum1D | Spectrum2D)[]>([]);
   const [twoDMode, setTwoDMode] = useState<'heatmap' | 'slices'>('heatmap');
+  const [showImag, setShowImag] = useState(false);
+  const [baselineCorrect, setBaselineCorrect] = useState(false);
 
   useEffect(() => {
     if (sampleId) {
@@ -209,10 +211,28 @@ export default function Viewer() {
                   {plotted1D.length > 0 && (
                     <Card className="border-border/50">
                       <CardHeader>
-                        <CardTitle className="text-lg">1D Spectra</CardTitle>
+                        <div className="flex items-center justify-between gap-4">
+                          <CardTitle className="text-lg">1D Spectra</CardTitle>
+                          <div className="flex gap-2">
+                            <Button
+                              variant={baselineCorrect ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setBaselineCorrect(v => !v)}
+                            >
+                              {baselineCorrect ? 'Baseline On' : 'Baseline Off'}
+                            </Button>
+                            <Button
+                              variant={showImag ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setShowImag(v => !v)}
+                            >
+                              {showImag ? 'Hide Imag' : 'Show Imag'}
+                            </Button>
+                          </div>
+                        </div>
                       </CardHeader>
                       <CardContent>
-                        <SpectrumPlot1D spectra={plotted1D} />
+                        <SpectrumPlot1D spectra={plotted1D} showImag={showImag} baselineCorrect={baselineCorrect} />
                       </CardContent>
                     </Card>
                   )}

@@ -12,17 +12,52 @@ import {
 
 interface SpectrumPlot1DProps {
   spectra: Spectrum1D[];
+  showImag?: boolean;
+  baselineCorrect?: boolean;
 }
 
-export default function SpectrumPlot1D({ spectra }: SpectrumPlot1DProps) {
+export default function SpectrumPlot1D({ spectra, showImag = false, baselineCorrect = false }: SpectrumPlot1DProps) {
   if (spectra.length === 0) return null;
+
+  const phaseCorrect = (real: number[], imag: number[]) => {
+    let rr = 0;
+    let ii = 0;
+    let ri = 0;
+    for (let i = 0; i < real.length; i++) {
+      const r = real[i] ?? 0;
+      const im = imag[i] ?? 0;
+      rr += r * r;
+      ii += im * im;
+      ri += r * im;
+    }
+    const phi = 0.5 * Math.atan2(2 * ri, rr - ii);
+    const c = Math.cos(phi);
+    const s = Math.sin(phi);
+
+    const realOut: number[] = [];
+    const imagOut: number[] = [];
+    for (let i = 0; i < real.length; i++) {
+      const r = real[i] ?? 0;
+      const im = imag[i] ?? 0;
+      realOut.push(r * c - im * s);
+      imagOut.push(r * s + im * c);
+    }
+    return { realOut, imagOut };
+  };
+
+  const spectraToPlot = baselineCorrect
+    ? spectra.map(s => {
+        const { realOut, imagOut } = phaseCorrect(s.realData, s.imagData);
+        return { ...s, realData: realOut, imagData: imagOut };
+      })
+    : spectra;
 
   const precision = 6;
   const keyFor = (x: number) =>
     Number.isFinite(x) ? x.toFixed(precision) : `${x}`;
 
   // Build per-spectrum maps to handle different x grids
-  const pointMaps = spectra.map(spectrum => {
+  const pointMaps = spectraToPlot.map(spectrum => {
     const map = new Map<
       string,
       { x: number; real: number; imag: number }
@@ -113,7 +148,7 @@ export default function SpectrumPlot1D({ spectra }: SpectrumPlot1DProps) {
               fontSize: '11px',
             }}
           />
-          {spectra.map((spectrum, idx) => (
+          {spectraToPlot.map((spectrum, idx) => (
             <Line
               key={`${spectrum.id}-real`}
               type="monotone"
@@ -125,19 +160,20 @@ export default function SpectrumPlot1D({ spectra }: SpectrumPlot1DProps) {
               activeDot={{ r: 3, fill: colors[idx % colors.length] }}
             />
           ))}
-          {spectra.map((spectrum, idx) => (
-            <Line
-              key={`${spectrum.id}-imag`}
-              type="monotone"
-              dataKey={`imag_${idx}`}
-              name={`${spectrum.filename} (Imag)`}
-              stroke={colors[idx % colors.length]}
-              strokeWidth={1.5}
-              strokeDasharray="5 5"
-              dot={false}
-              opacity={0.6}
-            />
-          ))}
+          {showImag &&
+            spectraToPlot.map((spectrum, idx) => (
+              <Line
+                key={`${spectrum.id}-imag`}
+                type="monotone"
+                dataKey={`imag_${idx}`}
+                name={`${spectrum.filename} (Imag)`}
+                stroke={colors[idx % colors.length]}
+                strokeWidth={1.5}
+                strokeDasharray="5 5"
+                dot={false}
+                opacity={0.6}
+              />
+            ))}
         </LineChart>
       </ResponsiveContainer>
     </div>
