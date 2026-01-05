@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import ThemeToggle from "@/components/ThemeToggle";
 import Index from "./pages/Index";
 import Samples from "./pages/Samples";
 import ArchiveContents from "./pages/ArchiveContents";
@@ -49,6 +50,9 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
+        <div className="fixed bottom-4 right-4 z-30">
+          <ThemeToggle />
+        </div>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>

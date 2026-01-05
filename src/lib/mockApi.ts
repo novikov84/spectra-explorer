@@ -22,6 +22,7 @@ export interface Spectrum1D {
   type: SpectrumType;
   xLabel: string;
   yLabel: string;
+  parsedParams?: ParsedParams;
   xData: number[];
   realData: number[];
   imagData: number[];
@@ -33,9 +34,19 @@ export interface Spectrum2D {
   type: SpectrumType;
   xLabel: string;
   yLabel: string;
+  parsedParams?: ParsedParams;
   xData: number[];
   yData: number[];
   zData: number[][];
+}
+
+export interface ParsedParams {
+  sampleName: string;
+  temperatureK?: number;
+  fieldG?: number;
+  amplifierDb?: number;
+  pulseWidth?: number;
+  tokens: string[];
 }
 
 type StoredSample = {
@@ -119,6 +130,46 @@ const toFolder = (path: string): string => {
   return idx === -1 ? '' : clean.slice(0, idx);
 };
 
+function parseParamsFromName(rawName: string): ParsedParams {
+  const base = rawName.replace(/\.[^.]+$/, '');
+  const tokens = base.split('_').filter(Boolean);
+  const sampleName = tokens[0] || base;
+
+  let temperatureK: number | undefined;
+  let fieldG: number | undefined;
+  let amplifierDb: number | undefined;
+  let pulseWidth: number | undefined;
+
+  for (const tok of tokens) {
+    const lower = tok.toLowerCase();
+    const tempMatch = lower.match(/(\d+(?:\.\d+)?)k/);
+    if (tempMatch) {
+      temperatureK = Number(tempMatch[1]);
+    }
+    const fieldMatch = lower.match(/(\d+(?:\.\d+)?)g/);
+    if (fieldMatch) {
+      fieldG = Number(fieldMatch[1]);
+    }
+    const ampMatch = lower.match(/hpa(\d+(?:\.\d+)?)db/);
+    if (ampMatch) {
+      amplifierDb = Number(ampMatch[1]);
+    }
+    const pulseMatch = lower.match(/p(\d+(?:\.\d+)?)/);
+    if (pulseMatch) {
+      pulseWidth = Number(pulseMatch[1]);
+    }
+  }
+
+  return {
+    sampleName,
+    temperatureK,
+    fieldG,
+    amplifierDb,
+    pulseWidth,
+    tokens,
+  };
+}
+
 async function readAxisCsv(zip: JSZip, folder: string, axisName: string, points?: number) {
   const prefix = folder ? folder.replace(/\/?$/, '/') : '';
   const txt = await readTextIfExists(zip, `${prefix}axes_${axisName}.csv`);
@@ -157,6 +208,7 @@ async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any
     metadata?.dataset_header?.dataset_name ||
     folder.split('/').filter(Boolean).pop() ||
     'dataset';
+  const parsedParams = parseParamsFromName(datasetName);
   const prefix = folder ? `${folder}/` : '';
 
   const axisList = Array.isArray(metadata?.axes) ? metadata.axes : [];
@@ -178,6 +230,7 @@ async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any
       id: '',
       filename: datasetName,
       type: inferSpectrumType(datasetName, metadata, false),
+      parsedParams,
       xLabel: axisLabel(xAxisMeta, 'X'),
       yLabel: 'Intensity (a.u.)',
       xData: resolvedX,
@@ -209,6 +262,7 @@ async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any
       id: '',
       filename: datasetName,
       type: inferSpectrumType(datasetName, metadata, false),
+      parsedParams,
       xLabel: axisLabel(xAxisMeta, 'X'),
       yLabel: 'Intensity (a.u.)',
       xData: resolvedX,
@@ -227,6 +281,7 @@ async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any
     id: '',
     filename: datasetName,
     type: inferSpectrumType(datasetName, metadata, true),
+    parsedParams,
     xLabel: axisLabel(xAxisMeta, 'X'),
     yLabel: axisLabel(yAxisMeta, 'Y'),
     xData,
@@ -424,6 +479,7 @@ async function parseRawBes3t(zip: JSZip) {
       const meta = parseDscText(dscText);
       const dir = toFolder(entry.name);
       const base = entry.name.split('/').pop()?.replace(/\.dsc$/i, '') || 'dataset';
+      const parsedParams = parseParamsFromName(base);
       const dtaEntry = dtaLookup(dir, base);
       if (!dtaEntry) {
         console.warn(`[mockApi] No DTA found for ${entry.name}`);
@@ -481,6 +537,7 @@ async function parseRawBes3t(zip: JSZip) {
           id,
           filename,
           type,
+          parsedParams,
           xLabel: axisLabel(xAxisMeta, 'X'),
           yLabel: axisLabel(yAxisMeta, 'Y'),
           xData: xVector,
@@ -494,6 +551,7 @@ async function parseRawBes3t(zip: JSZip) {
           id,
           filename,
           type,
+          parsedParams,
           xLabel: axisLabel(xAxisMeta, 'X'),
           yLabel: 'Intensity (a.u.)',
           xData: xVector,

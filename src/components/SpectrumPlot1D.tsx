@@ -14,9 +14,17 @@ interface SpectrumPlot1DProps {
   spectra: Spectrum1D[];
   showImag?: boolean;
   baselineCorrect?: boolean;
+  normalize?: boolean;
+  offset?: boolean;
 }
 
-export default function SpectrumPlot1D({ spectra, showImag = false, baselineCorrect = false }: SpectrumPlot1DProps) {
+export default function SpectrumPlot1D({
+  spectra,
+  showImag = false,
+  baselineCorrect = false,
+  normalize = true,
+  offset = true,
+}: SpectrumPlot1DProps) {
   if (spectra.length === 0) return null;
 
   const phaseCorrect = (real: number[], imag: number[]) => {
@@ -45,12 +53,24 @@ export default function SpectrumPlot1D({ spectra, showImag = false, baselineCorr
     return { realOut, imagOut };
   };
 
-  const spectraToPlot = baselineCorrect
-    ? spectra.map(s => {
-        const { realOut, imagOut } = phaseCorrect(s.realData, s.imagData);
-        return { ...s, realData: realOut, imagData: imagOut };
-      })
-    : spectra;
+  const spectraToPlot = spectra.map(s => {
+    let real = s.realData;
+    let imag = s.imagData;
+
+    if (baselineCorrect) {
+      const { realOut, imagOut } = phaseCorrect(real, imag);
+      real = realOut;
+      imag = imagOut;
+    }
+
+    if (normalize) {
+      const maxAbs = Math.max(...real.map(v => Math.abs(v)), 1);
+      real = real.map(v => v / maxAbs);
+      imag = imag.map(v => v / maxAbs);
+    }
+
+    return { ...s, realData: real, imagData: imag };
+  });
 
   const precision = 6;
   const keyFor = (x: number) =>
@@ -77,14 +97,16 @@ export default function SpectrumPlot1D({ spectra, showImag = false, baselineCorr
     new Set(pointMaps.flatMap(m => Array.from(m.keys()))),
   ).sort((a, b) => parseFloat(a) - parseFloat(b));
 
+  const spacing = 1;
   const data = allKeys.map(key => {
     const x = parseFloat(key);
     const point: Record<string, number | undefined> = { x };
     pointMaps.forEach((map, idx) => {
+      const shift = offset ? spacing * (spectraToPlot.length - idx) : 0;
       const entry = map.get(key);
       if (entry) {
-        point[`real_${idx}`] = entry.real;
-        point[`imag_${idx}`] = entry.imag;
+        point[`real_${idx}`] = entry.real + shift;
+        point[`imag_${idx}`] = entry.imag + shift;
       }
     });
     return point;
@@ -99,7 +121,7 @@ export default function SpectrumPlot1D({ spectra, showImag = false, baselineCorr
   ];
 
   const xLabel = spectra.length === 1 ? spectra[0].xLabel : 'X Axis';
-  const yLabel = spectra.length === 1 ? spectra[0].yLabel : 'Intensity (a.u.)';
+  const yLabel = spectra.length === 1 ? spectra[0].yLabel : offset ? 'Intensity (shifted)' : 'Intensity (a.u.)';
 
   return (
     <div className="w-full h-[400px] bg-card/50 rounded-lg p-4 border border-border/50">
@@ -131,16 +153,7 @@ export default function SpectrumPlot1D({ spectra, showImag = false, baselineCorr
               fontSize: 12,
             }}
           />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: 'hsl(var(--popover))',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: '8px',
-              color: 'hsl(var(--popover-foreground))',
-              fontFamily: 'JetBrains Mono, monospace',
-              fontSize: '12px',
-            }}
-          />
+          <Tooltip cursor={false} content={() => null} />
           <Legend
             wrapperStyle={{
               paddingTop: '20px',
