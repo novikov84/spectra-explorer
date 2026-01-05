@@ -9,7 +9,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node tests/unit/reportState.cjs"
+    "build:test": "tsc -p tests/tsconfig.test.json",
+    "test": "npm run build:test && node tests/unit/reportState.cjs && node tests/unit/mockApi.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

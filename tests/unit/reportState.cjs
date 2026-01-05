@@ -11,8 +11,15 @@ function computeMasterState(children) {
 }
 
 function toggleMaster(children) {
-  const { masterChecked } = computeMasterState(children);
+  const { masterChecked, masterIndeterminate } = computeMasterState(children);
   const target = masterChecked ? false : true; // indeterminate also flips to all on
+  // If indeterminate and target is true, set all on; if indeterminate and target false, set all off
+  if (masterIndeterminate && target) {
+    return children.map(() => true);
+  }
+  if (masterIndeterminate && !target) {
+    return children.map(() => false);
+  }
   return children.map(() => target);
 }
 

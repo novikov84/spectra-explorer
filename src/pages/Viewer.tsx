@@ -108,9 +108,31 @@ export default function Viewer() {
     });
   };
 
-  const plotted1D = plottedSpectra.filter((s): s is Spectrum1D => !is2DSpectrum(s));
+  const plottedRabi = plottedSpectra.filter(
+    (s): s is Spectrum1D => !is2DSpectrum(s) && s.type === 'Rabi',
+  );
+  const plotted1D = plottedSpectra.filter(
+    (s): s is Spectrum1D => !is2DSpectrum(s) && s.type !== 'Rabi',
+  );
   const plotted2D = plottedSpectra.filter((s): s is Spectrum2D => is2DSpectrum(s));
-  const plottedRabi = plotted1D.filter(s => s.type === 'Rabi');
+
+  const grouped1DByType: Record<SpectrumType, Spectrum1D[]> = useMemo(() => {
+    const groups: Record<SpectrumType, Spectrum1D[]> = {
+      CW: [],
+      EDFS: [],
+      T1: [],
+      T2: [],
+      Rabi: [],
+      HYSCORE: [],
+      '2D': [],
+      Unknown: [],
+    };
+    plotted1D.forEach(s => {
+      groups[s.type] = groups[s.type] || [];
+      groups[s.type].push(s);
+    });
+    return groups;
+  }, [plotted1D]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -245,55 +267,61 @@ export default function Viewer() {
                 </Card>
               ) : (
                 <>
-                  {/* 1D Plots */}
-                  {plotted1D.length > 0 && (
-                    <Card className="border-border/50">
-                      <CardHeader>
-                        <div className="flex items-center justify-between gap-4">
-                          <CardTitle className="text-lg">1D Spectra</CardTitle>
-                          <div className="flex gap-2 flex-wrap">
-                            <Button
-                              variant={normalize1D ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setNormalize1D(v => !v)}
-                            >
-                              {normalize1D ? 'Normalized' : 'Raw scale'}
-                            </Button>
-                            <Button
-                              variant={offset1D ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setOffset1D(v => !v)}
-                            >
-                              {offset1D ? 'Shifted' : 'Overlaid'}
-                            </Button>
-                            <Button
-                              variant={baselineCorrect ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setBaselineCorrect(v => !v)}
-                            >
-                              {baselineCorrect ? 'Baseline On' : 'Baseline Off'}
-                            </Button>
-                            <Button
-                              variant={showImag ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setShowImag(v => !v)}
-                            >
-                              {showImag ? 'Hide Imag' : 'Show Imag'}
-                            </Button>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <SpectrumPlot1D
-                          spectra={plotted1D}
-                          showImag={showImag}
-                          baselineCorrect={baselineCorrect}
-                          normalize={normalize1D}
-                          offset={offset1D}
-                        />
-                      </CardContent>
-                    </Card>
-                  )}
+                  {/* 1D Plots by type (excluding Rabi) */}
+                  {spectrumGroups
+                    .filter(t => t !== 'Rabi' && t !== '2D' && t !== 'HYSCORE')
+                    .map(type => {
+                      const list = grouped1DByType[type];
+                      if (!list || list.length === 0) return null;
+                      return (
+                        <Card key={`group-${type}`} className="border-border/50">
+                          <CardHeader>
+                            <div className="flex items-center justify-between gap-4">
+                              <CardTitle className="text-lg">{type} Spectra</CardTitle>
+                              <div className="flex gap-2 flex-wrap">
+                                <Button
+                                  variant={normalize1D ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => setNormalize1D(v => !v)}
+                                >
+                                  {normalize1D ? 'Normalized' : 'Raw scale'}
+                                </Button>
+                                <Button
+                                  variant={offset1D ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => setOffset1D(v => !v)}
+                                >
+                                  {offset1D ? 'Shifted' : 'Overlaid'}
+                                </Button>
+                                <Button
+                                  variant={baselineCorrect ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => setBaselineCorrect(v => !v)}
+                                >
+                                  {baselineCorrect ? 'Baseline On' : 'Baseline Off'}
+                                </Button>
+                                <Button
+                                  variant={showImag ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => setShowImag(v => !v)}
+                                >
+                                  {showImag ? 'Hide Imag' : 'Show Imag'}
+                                </Button>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            <SpectrumPlot1D
+                              spectra={list}
+                              showImag={showImag}
+                              baselineCorrect={baselineCorrect}
+                              normalize={normalize1D}
+                              offset={offset1D}
+                            />
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
 
                   {plottedRabi.length > 0 && (
                     <Card className="border-border/50">

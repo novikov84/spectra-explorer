@@ -107,6 +107,43 @@ const axisLabel = (axis: any, fallback: string): string => {
   return `${name}${unit}`;
 };
 
+const isTimeAxis = (axisMeta: any): boolean => {
+  const name = (axisMeta?.name || '').toString().toLowerCase();
+  const unit = (axisMeta?.unit || '').toString().toLowerCase();
+  return (
+    unit === 's' ||
+    unit === 'ms' ||
+    unit === 'us' ||
+    unit === 'µs' ||
+    unit === 'ns' ||
+    name.includes('time') ||
+    name.includes('tau')
+  );
+};
+
+const normalizeAxisStart = (axis: number[] | null, axisMeta: any): number[] | null => {
+  if (!axis || axis.length < 1) return axis;
+  if (!isTimeAxis(axisMeta)) return axis;
+  const start = axis[0];
+  if (!Number.isFinite(start) || start === 0) return axis;
+  return axis.map(v => v - start);
+};
+
+const normalizeXForTimeType = (
+  x: number[],
+  type: SpectrumType,
+  xLabel: string,
+): number[] => {
+  const timeTypes: SpectrumType[] = ['T1', 'T2', 'Rabi', 'EDFS'];
+  if (!timeTypes.includes(type) && !xLabel.toLowerCase().includes('time')) {
+    return x;
+  }
+  if (x.length === 0) return x;
+  const min = Math.min(...x);
+  if (!Number.isFinite(min) || min === 0) return x;
+  return x.map(v => v - min);
+};
+
 const inferSpectrumType = (datasetName: string, metadata: any, is2D: boolean): SpectrumType => {
   const name = (datasetName || '').toLowerCase();
   if (name.includes('edfs')) return 'EDFS';
@@ -217,23 +254,32 @@ async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any
   const yAxisMeta =
     axisList.find((ax: any) => (ax.axis_id || '').toUpperCase() === 'Y') || axisList[1];
 
-  const xAxis = await readAxisCsv(zip, prefix, 'x', xAxisMeta?.points);
-  const yAxis = await readAxisCsv(zip, prefix, 'y', yAxisMeta?.points);
+  let xAxis = await readAxisCsv(zip, prefix, 'x', xAxisMeta?.points);
+  let yAxis = await readAxisCsv(zip, prefix, 'y', yAxisMeta?.points);
+
+  xAxis = normalizeAxisStart(xAxis, xAxisMeta);
+  yAxis = normalizeAxisStart(yAxis, yAxisMeta);
 
   // 1D path first (data.csv)
   const dataCsv = await readTextIfExists(zip, `${prefix}data.csv`);
+  const spectrumType1D = inferSpectrumType(datasetName, metadata, false);
   if (dataCsv) {
     const rows = parseCsv(dataCsv);
     const { xData, realData, imagData } = build1DFromCsv(rows);
     const resolvedX = xAxis && xAxis.length === realData.length ? xAxis : xData;
+    const timeAdjustedX = normalizeXForTimeType(
+      resolvedX,
+      spectrumType1D,
+      axisLabel(xAxisMeta, 'X'),
+    );
     const spectrum: Spectrum1D = {
       id: '',
       filename: datasetName,
-      type: inferSpectrumType(datasetName, metadata, false),
+      type: spectrumType1D,
       parsedParams,
       xLabel: axisLabel(xAxisMeta, 'X'),
       yLabel: 'Intensity (a.u.)',
-      xData: resolvedX,
+      xData: timeAdjustedX,
       realData,
       imagData,
     };
@@ -258,14 +304,19 @@ async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any
     // Treat as 1D (x, real)
     const { xData, realData, imagData } = build1DFromCsv(realMatrix);
     const resolvedX = xAxis && xAxis.length === realData.length ? xAxis : xData;
+    const timeAdjustedX = normalizeXForTimeType(
+      resolvedX,
+      spectrumType1D,
+      axisLabel(xAxisMeta, 'X'),
+    );
     const spectrum: Spectrum1D = {
       id: '',
       filename: datasetName,
-      type: inferSpectrumType(datasetName, metadata, false),
+      type: spectrumType1D,
       parsedParams,
       xLabel: axisLabel(xAxisMeta, 'X'),
       yLabel: 'Intensity (a.u.)',
-      xData: resolvedX,
+      xData: timeAdjustedX,
       realData,
       imagData,
     };
@@ -292,7 +343,7 @@ async function parseSpectrumFromFolder(zip: JSZip, folder: string, metadata: any
   return { spectrum, is2D: true };
 }
 
-async function parseZipArchive(file: File | Blob) {
+async function parseZipArchive(file: File | Blob | ArrayBuffer | Uint8Array) {
   console.info('[mockApi] parseZipArchive: start');
   const zip = await JSZip.loadAsync(file);
   const metaEntries = zip
@@ -518,14 +569,19 @@ async function parseRawBes3t(zip: JSZip) {
         imag.push(...Array.from({ length: npts }, () => 0));
       }
 
-      const xAxisMeta = axisGuess(meta, 'X', xpts);
-      const yAxisMeta = axisGuess(meta, 'Y', ypts > 0 ? ypts : 1);
-      const xVector = axisVector(xAxisMeta);
-      const yVector = ypts > 1 ? axisVector(yAxisMeta) : null;
-
       const id = uid('file');
       const filename = getStr(meta, 'TITL', `${base}.dsc`);
-      const type = inferSpectrumType(filename, { classification: { experiment_family: getStr(meta, 'EXPT', '') } }, ypts > 1);
+      const type = inferSpectrumType(
+        filename,
+        { classification: { experiment_family: getStr(meta, 'EXPT', '') } },
+        ypts > 1,
+      );
+      const xAxisMeta = axisGuess(meta, 'X', xpts);
+      const yAxisMeta = axisGuess(meta, 'Y', ypts > 0 ? ypts : 1);
+      const xVectorRaw = normalizeAxisStart(axisVector(xAxisMeta), xAxisMeta) || [];
+      const xVector = normalizeXForTimeType(xVectorRaw, type, axisLabel(xAxisMeta, 'X'));
+      const yVectorRaw = ypts > 1 ? axisVector(yAxisMeta) : null;
+      const yVector = normalizeAxisStart(yVectorRaw, yAxisMeta);
 
       if (ypts > 1) {
         const zData: number[][] = [];
@@ -663,3 +719,14 @@ export const mockApi = {
 export function is2DSpectrum(spectrum: Spectrum1D | Spectrum2D): spectrum is Spectrum2D {
   return 'zData' in spectrum;
 }
+
+// Export selected helpers for tests
+export {
+  parseZipArchive,
+  parseRawBes3t,
+  parseDscText,
+  build1DFromCsv,
+  normalizeAxisStart,
+  normalizeXForTimeType,
+  inferSpectrumType,
+};
