@@ -91,48 +91,92 @@ export default function SpectrumPlot1D({
     return { timeScale: scale, timeUnit: unit, xLabel: newLabel };
   }, [spectra]);
 
+  // --- Dynamic Y Scaling (User Request: max 3 digits) ---
+  const { yScale, yMultiplierLabel } = useMemo(() => {
+    if (!spectra || spectra.length === 0) return { yScale: 1, yMultiplierLabel: '' };
+
+    // Find global max Y (absolute value) to determine scale
+    let maxY = 0;
+    spectra.forEach(s => {
+      const maxR = Math.max(...s.realData.map(Math.abs));
+      const maxI = showImag ? Math.max(...s.imagData.map(Math.abs)) : 0;
+      maxY = Math.max(maxY, maxR, maxI);
+    });
+
+    // If we are validating against normalized data (which is 0-1), we don't scale.
+    // BUT, the normalization step happens *per spectrum* below. 
+    // If the user wants "normalized" view, inputs are already 0-1 range approx.
+    // If "raw", they can be huge.
+    // However, the logic below applies normalization *after* this scale if we aren't careful.
+    // Actually, processedData below handles normalization. 
+    // We should compute the "Raw Max" here.
+
+    if (normalize) return { yScale: 1, yMultiplierLabel: '' }; // Normalized is always 0-1
+
+    let scale = 1;
+    let label = '';
+
+    if (maxY >= 1e9) {
+      scale = 1e-9;
+      label = ' (x10⁹)';
+    } else if (maxY >= 1e6) {
+      scale = 1e-6;
+      label = ' (x10⁶)';
+    } else if (maxY >= 1000) {
+      scale = 1e-3;
+      label = ' (x10³)';
+    }
+
+    return { yScale: scale, yMultiplierLabel: label };
+  }, [spectra, normalize, showImag]);
+
   const processedData = useMemo(() => {
     if (!spectra || spectra.length === 0) return [];
 
     return spectra.map((spectrum) => {
       let yReal = [...spectrum.realData];
       let yImag = [...spectrum.imagData];
+
+      // Apply Dynamic Y Scale (only if not normalizing, handled by check above)
+      if (yScale !== 1) {
+        yReal = yReal.map(v => v * yScale);
+        yImag = yImag.map(v => v * yScale);
+      }
+
       // Scale X data
       let xData = spectrum.xData.map(x => x * timeScale);
 
-      // 1. Baseline Correction (simple average subtraction)
-      if (baselineCorrect) {
-        const avgReal =
-          yReal.reduce((a, b) => a + b, 0) / (yReal.length || 1);
-        yReal = yReal.map((v) => v - avgReal);
+      // ... rest of processing (Baseline, Norm) ...
+      // Note: If Normalize is checked, yScale is 1, so this block is skipped, 
+      // and then Normalization later scales to 0-1.
 
-        const avgImag =
-          yImag.reduce((a, b) => a + b, 0) / (yImag.length || 1);
+      // 1. Baseline Correction
+      if (baselineCorrect) {
+        // ... (existing baseline logic)
+        const avgReal = yReal.reduce((a, b) => a + b, 0) / (yReal.length || 1);
+        yReal = yReal.map((v) => v - avgReal);
+        const avgImag = yImag.reduce((a, b) => a + b, 0) / (yImag.length || 1);
         yImag = yImag.map((v) => v - avgImag);
       }
 
-      // 2. Normalization (max abs value)
-      // 2. Normalization (max abs value)
+      // 2. Normalization
       if (normalize) {
-        // Find max of Real component
         const maxReal = Math.max(...yReal.map(Math.abs)) || 1;
-
-        // Scale REAL by maxReal
         yReal = yReal.map((v) => v / maxReal);
-
-        // Scale IMAG by the SAME factor (maxReal) to preserve relative amplitude
-        // user request: "if we use "Normilize" it should not normalize separately img spectrum, only real (and img changes correspondingly)"
         yImag = yImag.map((v) => v / maxReal);
       }
 
       return {
         ...spectrum,
-        xData, // Override original xData with scaled version
+        xData,
         processedReal: yReal,
-        processedImag: yImag,
+        processedImag: yImag
       };
     });
-  }, [spectra, baselineCorrect, normalize, timeScale]);
+  }, [spectra, baselineCorrect, normalize, timeScale, yScale]);
+
+  // Update Label
+  const effectiveYLabel = (spectra.length > 0 ? spectra[0].yLabel : '') + yMultiplierLabel;
 
   // Merge datasets for plotting
   const mergedData = useMemo(() => {
@@ -249,7 +293,7 @@ export default function SpectrumPlot1D({
 
     // Common styles for overlaid legend
     const overlayStyle = {
-      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+      backgroundColor: 'hsl(var(--card) / 0.9)',
       padding: '10px',
       border: '1px solid hsl(var(--border))',
       borderRadius: '6px',
@@ -337,6 +381,12 @@ export default function SpectrumPlot1D({
             stroke="hsl(var(--muted-foreground))"
             fontSize={12}
             tickLine={false}
+            tickFormatter={(value: number) => {
+              return new Intl.NumberFormat('en-US', {
+                maximumSignificantDigits: 6,
+                useGrouping: false,
+              }).format(value);
+            }}
             label={{
               value: xLabel,
               position: 'bottom',
@@ -351,7 +401,7 @@ export default function SpectrumPlot1D({
             tickLine={false}
             width={60}
             label={{
-              value: yLabel,
+              value: effectiveYLabel,
               angle: -90,
               position: 'insideLeft',
               fill: 'hsl(var(--muted-foreground))',
