@@ -12,12 +12,19 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { ArrowLeft, Loader2, LineChart, Trash2, BarChart3, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import SpectrumPlot1D from '@/components/SpectrumPlot1D';
 import SpectrumPlot2D from '@/components/SpectrumPlot2D';
 import SpectrumPlot2DSlices from '@/components/SpectrumPlot2DSlices';
 import SpectrumPlotRabiCombined from '@/components/SpectrumPlotRabiCombined';
+import { getSpectrumLabel } from '@/lib/spectrumUtils';
 
 // DnD Imports
 import {
@@ -352,23 +359,31 @@ export default function Viewer() {
                             </div>
                             <div className="space-y-1 px-2 pb-2">
                               {groupSpectra.map((spectrum) => (
-                                <div
-                                  key={spectrum.id}
-                                  className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${selectedIds.has(spectrum.id)
-                                    ? 'bg-primary/10'
-                                    : 'hover:bg-secondary/30'
-                                    }`}
-                                  onClick={() => handleToggleSpectrum(spectrum.id)}
-                                >
-                                  <Checkbox
-                                    checked={selectedIds.has(spectrum.id)}
-                                    onCheckedChange={() => handleToggleSpectrum(spectrum.id)}
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                  <span className="font-mono text-xs truncate">
-                                    {spectrum.filename}
-                                  </span>
-                                </div>
+                                <TooltipProvider key={spectrum.id}>
+                                  <Tooltip delayDuration={300}>
+                                    <TooltipTrigger asChild>
+                                      <div
+                                        className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${selectedIds.has(spectrum.id)
+                                          ? 'bg-primary/10'
+                                          : 'hover:bg-secondary/30'
+                                          }`}
+                                        onClick={() => handleToggleSpectrum(spectrum.id)}
+                                      >
+                                        <Checkbox
+                                          checked={selectedIds.has(spectrum.id)}
+                                          onCheckedChange={() => handleToggleSpectrum(spectrum.id)}
+                                          onClick={(e) => e.stopPropagation()}
+                                        />
+                                        <span className="font-mono text-xs truncate">
+                                          {getSpectrumLabel(spectrum)}
+                                        </span>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="right">
+                                      <p>{spectrum.filename}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
                               ))}
                             </div>
                           </AccordionContent>
@@ -536,8 +551,9 @@ export default function Viewer() {
               </DndContext>
             </div>
           </div>
-        )}
-      </main>
-    </div>
+        )
+        }
+      </main >
+    </div >
   );
 }

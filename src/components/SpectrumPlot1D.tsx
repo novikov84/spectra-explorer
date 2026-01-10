@@ -1,4 +1,5 @@
 import { Spectrum1D } from '@/lib/mockApi';
+import { getSpectrumLabel } from '@/lib/spectrumUtils';
 import {
   LineChart,
   Line,
@@ -259,29 +260,12 @@ export default function SpectrumPlot1D({
 
   const chartMargin = { top: 10, right: 30, left: 20, bottom: 40 };
 
-  // Helper helper for simplified legend
-  const getLegendLabel = (s: any, idx: number, suffix: string) => {
-    // If showImag is false, we don't need to distinguish Real/Imag, so no suffix needed
-    const actualSuffix = showImag ? ` (${suffix})` : '';
-
-    // Only simplifying for T1/T2 as requested
-    if ((s.type === 'T1' || s.type === 'T2') && s.parsedParams) {
-      const { temperatureK, fieldG } = s.parsedParams;
-      // Should show just Temp + Field if available
-      // e.g. "4K 4535G"
-      if (temperatureK !== undefined && fieldG !== undefined && temperatureK !== null && fieldG !== null) {
-        return `${temperatureK}K ${fieldG}G${actualSuffix}`;
-      }
-    }
-
-    if (s.type === 'EDFS' && s.parsedParams) {
-      const { temperatureK, spectralWidth } = s.parsedParams;
-      if (temperatureK !== undefined && spectralWidth !== undefined) {
-        return `${temperatureK}K SW=${spectralWidth}G${actualSuffix}`;
-      }
-    }
-    // Default fallback
-    return `${s.filename}${actualSuffix}`;
+  // Helper to generate legend label
+  const getLegendLabel = (s: Spectrum1D) => {
+    const base = getSpectrumLabel(s);
+    // The suffix (Real/Imag) is added directly in the <Line> component's `name` prop,
+    // so this function should just return the base label.
+    return base;
   };
 
   // Dynamic Legend Postioning based on Spectrum Type
@@ -416,7 +400,7 @@ export default function SpectrumPlot1D({
               key={`${spectrum.id}-real`}
               type="step"
               dataKey={`real_${idx}`}
-              name={getLegendLabel(spectrum, idx, 'Real')}
+              name={`${getLegendLabel(spectrum)} (Real)`}
               stroke={colors[idx % colors.length]}
               strokeWidth={1.5}
               dot={false}
@@ -431,7 +415,7 @@ export default function SpectrumPlot1D({
                 key={`${spectrum.id}-imag`}
                 type="step"
                 dataKey={`imag_${idx}`}
-                name={getLegendLabel(spectrum, idx, 'Imag')}
+                name={`${getLegendLabel(spectrum)} (Imag)`}
                 stroke={colors[idx % colors.length]}
                 strokeWidth={1}
                 strokeDasharray="5 5"
