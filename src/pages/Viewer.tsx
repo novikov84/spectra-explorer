@@ -28,11 +28,38 @@ export default function Viewer() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [plottedSpectra, setPlottedSpectra] = useState<(Spectrum1D | Spectrum2D)[]>([]);
+  const [viewOptions, setViewOptions] = useState<Record<string, {
+    normalize: boolean;
+    offset: boolean;
+    baseline: boolean;
+    showImag: boolean;
+  }>>({});
+
+  const getViewOptions = (type: string) => {
+    return viewOptions[type] || {
+      normalize: true,
+      offset: true,
+      baseline: false,
+      showImag: false,
+    };
+  };
+
+  const toggleOption = (type: string, key: 'normalize' | 'offset' | 'baseline' | 'showImag') => {
+    setViewOptions(prev => {
+      const current = prev[type] || {
+        normalize: true,
+        offset: true,
+        baseline: false,
+        showImag: false,
+      };
+      return {
+        ...prev,
+        [type]: { ...current, [key]: !current[key] },
+      };
+    });
+  };
+
   const [twoDMode, setTwoDMode] = useState<'heatmap' | 'slices'>('heatmap');
-  const [showImag, setShowImag] = useState(false);
-  const [baselineCorrect, setBaselineCorrect] = useState(false);
-  const [normalize1D, setNormalize1D] = useState(true);
-  const [offset1D, setOffset1D] = useState(true);
 
   useEffect(() => {
     if (sampleId) {
@@ -239,11 +266,10 @@ export default function Viewer() {
                               {groupSpectra.map((spectrum) => (
                                 <div
                                   key={spectrum.id}
-                                  className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${
-                                    selectedIds.has(spectrum.id)
-                                      ? 'bg-primary/10'
-                                      : 'hover:bg-secondary/30'
-                                  }`}
+                                  className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${selectedIds.has(spectrum.id)
+                                    ? 'bg-primary/10'
+                                    : 'hover:bg-secondary/30'
+                                    }`}
                                   onClick={() => handleToggleSpectrum(spectrum.id)}
                                 >
                                   <Checkbox
@@ -286,6 +312,9 @@ export default function Viewer() {
                     .map(type => {
                       const list = grouped1DByType[type];
                       if (!list || list.length === 0) return null;
+
+                      const opts = getViewOptions(type);
+
                       return (
                         <Card key={`group-${type}`} className="border-border/50">
                           <CardHeader>
@@ -293,32 +322,32 @@ export default function Viewer() {
                               <CardTitle className="text-lg">{type} Spectra</CardTitle>
                               <div className="flex gap-2 flex-wrap">
                                 <Button
-                                  variant={normalize1D ? 'default' : 'outline'}
+                                  variant={opts.normalize ? 'default' : 'outline'}
                                   size="sm"
-                                  onClick={() => setNormalize1D(v => !v)}
+                                  onClick={() => toggleOption(type, 'normalize')}
                                 >
-                                  {normalize1D ? 'Normalized' : 'Raw scale'}
+                                  {opts.normalize ? 'Normalized' : 'Raw scale'}
                                 </Button>
                                 <Button
-                                  variant={offset1D ? 'default' : 'outline'}
+                                  variant={opts.offset ? 'default' : 'outline'}
                                   size="sm"
-                                  onClick={() => setOffset1D(v => !v)}
+                                  onClick={() => toggleOption(type, 'offset')}
                                 >
-                                  {offset1D ? 'Shifted' : 'Overlaid'}
+                                  {opts.offset ? 'Shifted' : 'Overlaid'}
                                 </Button>
                                 <Button
-                                  variant={baselineCorrect ? 'default' : 'outline'}
+                                  variant={opts.baseline ? 'default' : 'outline'}
                                   size="sm"
-                                  onClick={() => setBaselineCorrect(v => !v)}
+                                  onClick={() => toggleOption(type, 'baseline')}
                                 >
-                                  {baselineCorrect ? 'Baseline On' : 'Baseline Off'}
+                                  {opts.baseline ? 'Baseline On' : 'Baseline Off'}
                                 </Button>
                                 <Button
-                                  variant={showImag ? 'default' : 'outline'}
+                                  variant={opts.showImag ? 'default' : 'outline'}
                                   size="sm"
-                                  onClick={() => setShowImag(v => !v)}
+                                  onClick={() => toggleOption(type, 'showImag')}
                                 >
-                                  {showImag ? 'Hide Imag' : 'Show Imag'}
+                                  {opts.showImag ? 'Hide Imag' : 'Show Imag'}
                                 </Button>
                               </div>
                             </div>
@@ -326,10 +355,10 @@ export default function Viewer() {
                           <CardContent>
                             <SpectrumPlot1D
                               spectra={list}
-                              showImag={showImag}
-                              baselineCorrect={baselineCorrect}
-                              normalize={normalize1D}
-                              offset={offset1D}
+                              showImag={opts.showImag}
+                              baselineCorrect={opts.baseline}
+                              normalize={opts.normalize}
+                              offset={opts.offset}
                             />
                           </CardContent>
                         </Card>
@@ -374,11 +403,11 @@ export default function Viewer() {
                       <CardContent className="space-y-6">
                         {twoDMode === 'heatmap'
                           ? plotted2D.map((spectrum) => (
-                              <SpectrumPlot2D key={spectrum.id} spectrum={spectrum} />
-                            ))
+                            <SpectrumPlot2D key={spectrum.id} spectrum={spectrum} />
+                          ))
                           : plotted2D.map((spectrum) => (
-                              <SpectrumPlot2DSlices key={spectrum.id} spectrum={spectrum} />
-                            ))}
+                            <SpectrumPlot2DSlices key={spectrum.id} spectrum={spectrum} />
+                          ))}
                       </CardContent>
                     </Card>
                   )}
