@@ -193,118 +193,66 @@ def login(email: str, password: str):
     return AuthResponse(accessToken="demo-token")
 
 
-def parse_csv_text(text: str) -> List[List[float]]:
-    rows: List[List[float]] = []
-    for line in text.strip().splitlines():
-        parts = [p.strip() for p in line.split(",") if p.strip() != ""]
-        if not parts:
-            continue
-        nums = []
-        for p in parts:
-            try:
-                nums.append(float(p))
-            except ValueError:
-                pass
-        if nums:
-            rows.append(nums)
-    return rows
+import parsers
 
-
-def build_1d_from_rows(rows: List[List[float]]) -> Spectrum1D:
-    x: List[float] = []
-    real: List[float] = []
-    imag: List[float] = []
-    for idx, row in enumerate(rows):
-        if len(row) == 1:
-            x.append(float(idx))
-            real.append(row[0])
-            imag.append(0.0)
-        elif len(row) == 2:
-            x.append(row[0])
-            real.append(row[1])
-            imag.append(0.0)
-        else:
-            x.append(row[0])
-            real.append(row[1])
-            imag.append(row[2])
-    return Spectrum1D(
-        id=f"spec-{uuid4()}",
-        filename="data.csv",
-        type="Unknown",
-        parsedParams=ParsedParams(sampleName="Sample", tokens=["data"]),
-        xLabel="X",
-        yLabel="Intensity (a.u.)",
-        xData=x,
-        realData=real,
-        imagData=imag,
-    )
-
+# ... existing code ...
 
 def parse_archive(content: bytes) -> tuple[str, Dict[str, Spectrum], List[SpectrumFile], Dict[str, int]]:
-    spectra: Dict[str, Spectrum] = {}
-    files: List[SpectrumFile] = []
-    counts: Dict[str, int] = {}
-    sample_name = "Uploaded Sample"
+    try:
+        sample_name, raw_spectra, count = parsers.parse_zip_archive(content)
+        
+        spectra: Dict[str, Spectrum] = {}
+        files: List[SpectrumFile] = []
+        counts: Dict[str, int] = {}
+        
+        for raw in raw_spectra:
+            spec_id = f"spec-{uuid4()}"
+            
+            # Convert parsed_params keys if needed or wrap
+            pp = None
+            if raw.parsed_params:
+                pp = ParsedParams(**raw.parsed_params)
+            
+            if isinstance(raw, parsers.Spectrum1D):
+                spec = Spectrum1D(
+                    id=spec_id,
+                    filename=raw.filename,
+                    type=raw.type,
+                    parsedParams=pp,
+                    xLabel=raw.x_label,
+                    yLabel=raw.y_label,
+                    xData=raw.x_data,
+                    realData=raw.real_data,
+                    imagData=raw.imag_data
+                )
+            elif isinstance(raw, parsers.Spectrum2D):
+                spec = Spectrum2D(
+                    id=spec_id,
+                    filename=raw.filename,
+                    type=raw.type,
+                    parsedParams=pp,
+                    xLabel=raw.x_label,
+                    yLabel=raw.y_label,
+                    xData=raw.x_data,
+                    yData=raw.y_data,
+                    zData=raw.z_data
+                )
+            else:
+                continue
 
-    with zipfile.ZipFile(io.BytesIO(content)) as zf:
-        meta_entries = [n for n in zf.namelist() if n.lower().endswith("metadata.json")]
-        if meta_entries:
-            for entry in meta_entries:
-                folder = entry.rsplit("/", 1)[0]
-                try:
-                    meta = zf.read(entry)
-                    mdata = json.loads(meta)
-                    dataset_name = mdata.get("dataset_header", {}).get("dataset_name") or folder or "dataset"
-                    sample_name = dataset_name
-                except Exception:
-                    dataset_name = folder or "dataset"
-                prefix = f"{folder}/" if folder else ""
-                try:
-                    data_text = zf.read(f"{prefix}data.csv").decode("utf-8")
-                    rows = parse_csv_text(data_text)
-                    spec = build_1d_from_rows(rows)
-                    spec.filename = dataset_name
-                    spec.type = infer_type_from_name(dataset_name)
-                    spec.parsedParams = ParsedParams(sampleName=dataset_name, tokens=[dataset_name])
-                    spec.id = f"{spec.id}"
-                    spectra[spec.id] = spec
-                    counts[spec.type] = counts.get(spec.type, 0) + 1
-                    files.append(SpectrumFile(id=f"file-{uuid4()}", filename=dataset_name, type=spec.type, selected=True))
-                except Exception:
-                    continue
-        if not spectra:
-            for name in zf.namelist():
-                if name.lower().endswith("data.csv"):
-                    try:
-                        data_text = zf.read(name).decode("utf-8")
-                        rows = parse_csv_text(data_text)
-                        spec = build_1d_from_rows(rows)
-                        spec.filename = name.rsplit("/", 1)[-1]
-                        spec.type = infer_type_from_name(spec.filename)
-                        spec.parsedParams = ParsedParams(sampleName=spec.filename, tokens=[spec.filename])
-                        spectra[spec.id] = spec
-                        counts[spec.type] = counts.get(spec.type, 0) + 1
-                        files.append(SpectrumFile(id=f"file-{uuid4()}", filename=spec.filename, type=spec.type, selected=True))
-                    except Exception:
-                        pass
-
-    return sample_name, spectra, files, counts
+            spectra[spec_id] = spec
+            counts[spec.type] = counts.get(spec.type, 0) + 1
+            files.append(SpectrumFile(id=f"file-{uuid4()}", filename=spec.filename, type=spec.type, selected=True))
+            
+        return sample_name, spectra, files, counts
+        
+    except Exception as e:
+        print(f"Error parsing archive: {e}")
+        return "Failed Sample", {}, [], {}
 
 def infer_type_from_name(name: str) -> SpectrumType:
-    lower = name.lower()
-    if "edfs" in lower:
-        return "EDFS"
-    if "rabi" in lower:
-        return "Rabi"
-    if "t1" in lower:
-        return "T1"
-    if "t2" in lower:
-        return "T2"
-    if "hyscore" in lower or "2d" in lower:
-        return "2D"
-    if "cw" in lower:
-        return "CW"
-    return "Unknown"
+    # Deprecated, logic moved to parsers.py but keeping for safety if needed by other parts
+    return parsers.infer_spectrum_type(name, {}, False)
 
 
 @app.post("/imports", response_model=ImportJob, status_code=202)
