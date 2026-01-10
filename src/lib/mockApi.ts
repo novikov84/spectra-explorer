@@ -46,6 +46,7 @@ export interface ParsedParams {
   fieldG?: number;
   amplifierDb?: number;
   pulseWidth?: number;
+  spectralWidth?: number;
   tokens: string[];
 }
 
@@ -176,24 +177,37 @@ function parseParamsFromName(rawName: string): ParsedParams {
   let fieldG: number | undefined;
   let amplifierDb: number | undefined;
   let pulseWidth: number | undefined;
+  let spectralWidth: number | undefined;
 
   for (const tok of tokens) {
     const lower = tok.toLowerCase();
-    const tempMatch = lower.match(/(\d+(?:\.\d+)?)k/);
+
+    // Support 'p' as decimal separator (e.g. 3p6k -> 3.6k)
+    // Regex: digit(s), optionally followed by [p.] and digit(s), then unit
+
+    const tempMatch = lower.match(/(\d+(?:[p.]\d+)?)k/);
     if (tempMatch) {
-      temperatureK = Number(tempMatch[1]);
+      temperatureK = Number(tempMatch[1].replace('p', '.'));
     }
-    const fieldMatch = lower.match(/(\d+(?:\.\d+)?)g/);
+
+    const fieldMatch = lower.match(/(\d+(?:[p.]\d+)?)g/);
     if (fieldMatch) {
-      fieldG = Number(fieldMatch[1]);
+      fieldG = Number(fieldMatch[1].replace('p', '.'));
     }
-    const ampMatch = lower.match(/hpa(\d+(?:\.\d+)?)db/);
+
+    const ampMatch = lower.match(/hpa(\d+(?:[p.]\d+)?)db/);
     if (ampMatch) {
-      amplifierDb = Number(ampMatch[1]);
+      amplifierDb = Number(ampMatch[1].replace('p', '.'));
     }
-    const pulseMatch = lower.match(/p(\d+(?:\.\d+)?)/);
+
+    const pulseMatch = lower.match(/p(\d+(?:[p.]\d+)?)/);
     if (pulseMatch) {
-      pulseWidth = Number(pulseMatch[1]);
+      pulseWidth = Number(pulseMatch[1].replace('p', '.'));
+    }
+
+    const swMatch = lower.match(/sw(\d+(?:[p.]\d+)?)/);
+    if (swMatch) {
+      spectralWidth = Number(swMatch[1].replace('p', '.'));
     }
   }
 
@@ -203,6 +217,7 @@ function parseParamsFromName(rawName: string): ParsedParams {
     fieldG,
     amplifierDb,
     pulseWidth,
+    spectralWidth,
     tokens,
   };
 }

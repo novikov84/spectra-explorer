@@ -35,8 +35,27 @@ export default function Viewer() {
     showImag: boolean;
   }>>({});
 
-  const getViewOptions = (type: string) => {
-    return viewOptions[type] || {
+  const getDefaultsForType = (type: string) => {
+    // EDFS defaults: Normalized + Shifted
+    if (type === 'EDFS') {
+      return {
+        normalize: true,
+        offset: true,
+        baseline: false,
+        showImag: false,
+      };
+    }
+    // T1/T2 defaults: Raw + Overlaid (offset=false)
+    if (type === 'T1' || type === 'T2') {
+      return {
+        normalize: false,
+        offset: false,
+        baseline: false,
+        showImag: false,
+      };
+    }
+    // General Default (CW, etc.)
+    return {
       normalize: true,
       offset: true,
       baseline: false,
@@ -44,14 +63,13 @@ export default function Viewer() {
     };
   };
 
+  const getViewOptions = (type: string) => {
+    return viewOptions[type] || getDefaultsForType(type);
+  };
+
   const toggleOption = (type: string, key: 'normalize' | 'offset' | 'baseline' | 'showImag') => {
     setViewOptions(prev => {
-      const current = prev[type] || {
-        normalize: true,
-        offset: true,
-        baseline: false,
-        showImag: false,
-      };
+      const current = prev[type] || getDefaultsForType(type);
       return {
         ...prev,
         [type]: { ...current, [key]: !current[key] },

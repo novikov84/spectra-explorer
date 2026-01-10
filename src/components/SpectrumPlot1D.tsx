@@ -48,12 +48,57 @@ export default function SpectrumPlot1D({
     'hsl(var(--primary))',
   ];
 
+  // --- Dynamic Time Scaling ---
+  const { timeScale, timeUnit, xLabel } = useMemo(() => {
+    if (!spectra || spectra.length === 0) {
+      return { timeScale: 1, timeUnit: '', xLabel: '' };
+    }
+
+    const firstLabel = spectra[0].xLabel || '';
+    const isTime = firstLabel.toLowerCase().includes('time') ||
+      ['T1', 'T2', 'Rabi', 'EDFS'].includes(spectra[0].type);
+
+    if (!isTime) {
+      return { timeScale: 1, timeUnit: '', xLabel: firstLabel };
+    }
+
+    // Find global max X to determine scale
+    let maxX = 0;
+    spectra.forEach(s => {
+      const localMax = Math.max(...s.xData);
+      if (localMax > maxX) maxX = localMax;
+    });
+
+    let scale = 1;
+    let unit = 'ns';
+
+    if (maxX > 2000000) { // > 2000 us -> ms
+      scale = 1e-6;
+      unit = 'ms';
+    } else if (maxX > 2000) { // > 2000 ns -> us
+      scale = 1e-3;
+      unit = 'µs';
+    }
+
+    // Only change label if we detected a unit change or generic time
+    let newLabel = firstLabel;
+    if (newLabel.includes('(ns)')) {
+      newLabel = newLabel.replace('(ns)', `(${unit})`);
+    } else {
+      newLabel = `${newLabel} (${unit})`;
+    }
+
+    return { timeScale: scale, timeUnit: unit, xLabel: newLabel };
+  }, [spectra]);
+
   const processedData = useMemo(() => {
     if (!spectra || spectra.length === 0) return [];
 
     return spectra.map((spectrum) => {
       let yReal = [...spectrum.realData];
       let yImag = [...spectrum.imagData];
+      // Scale X data
+      let xData = spectrum.xData.map(x => x * timeScale);
 
       // 1. Baseline Correction (simple average subtraction)
       if (baselineCorrect) {
@@ -67,21 +112,27 @@ export default function SpectrumPlot1D({
       }
 
       // 2. Normalization (max abs value)
+      // 2. Normalization (max abs value)
       if (normalize) {
+        // Find max of Real component
         const maxReal = Math.max(...yReal.map(Math.abs)) || 1;
+
+        // Scale REAL by maxReal
         yReal = yReal.map((v) => v / maxReal);
 
-        const maxImag = Math.max(...yImag.map(Math.abs)) || 1;
-        yImag = yImag.map((v) => v / maxImag);
+        // Scale IMAG by the SAME factor (maxReal) to preserve relative amplitude
+        // user request: "if we use "Normilize" it should not normalize separately img spectrum, only real (and img changes correspondingly)"
+        yImag = yImag.map((v) => v / maxReal);
       }
 
       return {
         ...spectrum,
+        xData, // Override original xData with scaled version
         processedReal: yReal,
         processedImag: yImag,
       };
     });
-  }, [spectra, baselineCorrect, normalize]);
+  }, [spectra, baselineCorrect, normalize, timeScale]);
 
   // Merge datasets for plotting
   const mergedData = useMemo(() => {
@@ -118,7 +169,6 @@ export default function SpectrumPlot1D({
     );
   }
 
-  const xLabel = spectra[0].xLabel;
   const yLabel = spectra[0].yLabel;
 
   // Zoom Handlers
@@ -164,6 +214,84 @@ export default function SpectrumPlot1D({
   }, [refAreaLeft, refAreaRight]); // Dependencies ensure zoom sees current state
 
   const chartMargin = { top: 10, right: 30, left: 20, bottom: 40 };
+
+  // Helper helper for simplified legend
+  const getLegendLabel = (s: any, idx: number, suffix: string) => {
+    // If showImag is false, we don't need to distinguish Real/Imag, so no suffix needed
+    const actualSuffix = showImag ? ` (${suffix})` : '';
+
+    // Only simplifying for T1/T2 as requested
+    if ((s.type === 'T1' || s.type === 'T2') && s.parsedParams) {
+      const { temperatureK, fieldG } = s.parsedParams;
+      // Should show just Temp + Field if available
+      // e.g. "4K 4535G"
+      if (temperatureK !== undefined && fieldG !== undefined && temperatureK !== null && fieldG !== null) {
+        return `${temperatureK}K ${fieldG}G${actualSuffix}`;
+      }
+    }
+
+    if (s.type === 'EDFS' && s.parsedParams) {
+      const { temperatureK, spectralWidth } = s.parsedParams;
+      if (temperatureK !== undefined && spectralWidth !== undefined) {
+        return `${temperatureK}K SW=${spectralWidth}G${actualSuffix}`;
+      }
+    }
+    // Default fallback
+    return `${s.filename}${actualSuffix}`;
+  };
+
+  // Dynamic Legend Postioning based on Spectrum Type
+  // T1 -> Bottom Right
+  // T2 -> Top Right
+  const legendProps = useMemo(() => {
+    if (!spectra || spectra.length === 0) return {};
+    const type = spectra[0].type;
+
+    // Common styles for overlaid legend
+    const overlayStyle = {
+      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+      padding: '10px',
+      border: '1px solid hsl(var(--border))',
+      borderRadius: '6px',
+      position: 'absolute' as const, // Force overlay, cast to const for correct type
+      zIndex: 10,
+      fontSize: '12px',
+    };
+
+    if (type === 'T1') {
+      return {
+        layout: 'vertical' as const,
+        verticalAlign: 'bottom' as const,
+        align: 'right' as const,
+        wrapperStyle: {
+          ...overlayStyle,
+          bottom: 50,
+          right: 20,
+          left: 'auto',
+          top: 'auto'
+        }
+      };
+    }
+    if (type === 'T2' || type === 'EDFS') {
+      return {
+        layout: 'vertical' as const,
+        verticalAlign: 'top' as const,
+        align: 'right' as const,
+        wrapperStyle: {
+          ...overlayStyle,
+          top: 10,
+          right: 20,
+          left: 'auto',
+          bottom: 'auto'
+        }
+      };
+    }
+    // Default
+    return {
+      wrapperStyle: { paddingTop: '20px' }
+    };
+
+  }, [spectra]);
 
   return (
     <div
@@ -231,18 +359,14 @@ export default function SpectrumPlot1D({
             }}
           />
           {/* Tooltip Removed per user request */}
-          <Legend
-            wrapperStyle={{
-              paddingTop: '20px',
-            }}
-          />
+          <Legend {...legendProps} />
 
           {processedData.map((spectrum, idx) => (
             <Line
               key={`${spectrum.id}-real`}
               type="step"
               dataKey={`real_${idx}`}
-              name={`${spectrum.filename} (Real)`}
+              name={getLegendLabel(spectrum, idx, 'Real')}
               stroke={colors[idx % colors.length]}
               strokeWidth={1.5}
               dot={false}
@@ -257,7 +381,7 @@ export default function SpectrumPlot1D({
                 key={`${spectrum.id}-imag`}
                 type="step"
                 dataKey={`imag_${idx}`}
-                name={`${spectrum.filename} (Imag)`}
+                name={getLegendLabel(spectrum, idx, 'Imag')}
                 stroke={colors[idx % colors.length]}
                 strokeWidth={1}
                 strokeDasharray="5 5"

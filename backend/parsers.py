@@ -91,14 +91,16 @@ def parse_params_from_name(raw_name: str) -> dict:
     
     for tok in tokens:
         lower = tok.lower()
-        if m := re.match(r'(\d+(?:\.\d+)?)k', lower):
-            params['temperatureK'] = float(m.group(1))
-        if m := re.match(r'(\d+(?:\.\d+)?)g', lower):
-            params['fieldG'] = float(m.group(1))
-        if m := re.match(r'hpa(\d+(?:\.\d+)?)db', lower):
-            params['amplifierDb'] = float(m.group(1))
-        if m := re.match(r'p(\d+(?:\.\d+)?)', lower):
-            params['pulseWidth'] = float(m.group(1))
+        if m := re.match(r'(\d+(?:[p\.]\d+)?)k', lower):
+            params['temperatureK'] = float(m.group(1).replace('p', '.'))
+        if m := re.match(r'(\d+(?:[p\.]\d+)?)g', lower):
+            params['fieldG'] = float(m.group(1).replace('p', '.'))
+        if m := re.match(r'hpa(\d+(?:[p\.]\d+)?)db', lower):
+            params['amplifierDb'] = float(m.group(1).replace('p', '.'))
+        if m := re.match(r'p(\d+(?:[p\.]\d+)?)', lower):
+            params['pulseWidth'] = float(m.group(1).replace('p', '.'))
+        if m := re.match(r'sw(\d+(?:[p\.]\d+)?)', lower):
+            params['spectralWidth'] = float(m.group(1).replace('p', '.'))
             
     return params
 
