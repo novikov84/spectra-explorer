@@ -1,0 +1,588 @@
+openapi: 3.0.3
+info:
+  title: Spectra Explorer API (draft)
+  version: 0.1.0
+servers:
+  - url: https://api.example.com
+    description: placeholder server; replace with real base URL
+tags:
+  - name: Auth
+  - name: Imports
+  - name: Samples
+  - name: Spectra
+  - name: Reports
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email/password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/guest:
+    post:
+      tags: [Auth]
+      summary: Start guest session
+      responses:
+        '200':
+          description: Guest session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+  /imports:
+    post:
+      tags: [Imports]
+      summary: Upload an archive and start parsing job
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required: [file]
+      responses:
+        '202':
+          description: Import accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Import'
+  /imports/{id}:
+    get:
+      tags: [Imports]
+      summary: Get import job status and logs
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Import status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Import'
+  /samples:
+    get:
+      tags: [Samples]
+      summary: List samples for the current workspace
+      responses:
+        '200':
+          description: Sample list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Sample'
+  /samples/{id}/spectra:
+    get:
+      tags: [Spectra]
+      summary: List spectra for a sample
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Spectra for the sample
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spectra:
+                    type: array
+                    items:
+                      oneOf:
+                        - $ref: '#/components/schemas/Spectrum1D'
+                        - $ref: '#/components/schemas/Spectrum2D'
+  /samples/{id}/files:
+    get:
+      tags: [Samples]
+      summary: List archive files for selection
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Archive files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpectrumFile'
+  /samples/{id}/process:
+    post:
+      tags: [Samples]
+      summary: Mark files for processing (kick off processing job)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessRequest'
+      responses:
+        '202':
+          description: Processing accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Import'
+  /spectra/{id}:
+    get:
+      tags: [Spectra]
+      summary: Get spectrum metadata
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Spectrum metadata
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Spectrum1D'
+                  - $ref: '#/components/schemas/Spectrum2D'
+  /spectra/{id}/data:
+    get:
+      tags: [Spectra]
+      summary: Get spectrum data arrays (inline or via signed URLs)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Spectrum data arrays
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpectrumData'
+  /reports:
+    get:
+      tags: [Reports]
+      summary: List reports
+      responses:
+        '200':
+          description: Report list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Report'
+    post:
+      tags: [Reports]
+      summary: Create a report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportCreate'
+      responses:
+        '201':
+          description: Report created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+  /reports/{id}:
+    get:
+      tags: [Reports]
+      summary: Get report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Report details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+    delete:
+      tags: [Reports]
+      summary: Delete report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+  /reports/{id}/items:
+    post:
+      tags: [Reports]
+      summary: Add item to report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportItemCreate'
+      responses:
+        '201':
+          description: Item added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+  /reports/{id}/items/{itemId}:
+    delete:
+      tags: [Reports]
+      summary: Remove item from report
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: itemId
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Item removed
+  /reports/{id}/export:
+    post:
+      tags: [Reports]
+      summary: Trigger PDF export
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Export job started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportJob'
+  /reports/{id}/export/status:
+    get:
+      tags: [Reports]
+      summary: Check export job status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportJob'
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required: [email, password]
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          example: Bearer
+      required: [accessToken, tokenType]
+    Import:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [uploaded, processing, ready, failed]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        error:
+          type: string
+        logs:
+          type: array
+          items:
+            type: string
+      required: [id, status, createdAt]
+    Sample:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        uploadDate:
+          type: string
+          format: date-time
+        fileCount:
+          type: integer
+        spectraByType:
+          type: object
+          additionalProperties:
+            type: integer
+      required: [id, name, fileCount]
+    ParsedParams:
+      type: object
+      properties:
+        sampleName:
+          type: string
+        temperatureK:
+          type: number
+        fieldG:
+          type: number
+        amplifierDb:
+          type: number
+        pulseWidth:
+          type: number
+        tokens:
+          type: array
+          items:
+            type: string
+      required: [sampleName, tokens]
+    SpectrumType:
+      type: string
+      enum: [CW, EDFS, T1, T2, Rabi, HYSCORE, "2D", Unknown]
+    SpectrumFile:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        type:
+          $ref: '#/components/schemas/SpectrumType'
+        selected:
+          type: boolean
+      required: [id, filename, type, selected]
+    Spectrum1D:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        type:
+          $ref: '#/components/schemas/SpectrumType'
+        parsedParams:
+          $ref: '#/components/schemas/ParsedParams'
+        xLabel:
+          type: string
+        yLabel:
+          type: string
+        xData:
+          type: array
+          items:
+            type: number
+        realData:
+          type: array
+          items:
+            type: number
+        imagData:
+          type: array
+          items:
+            type: number
+      required: [id, filename, type, xLabel, yLabel, xData, realData, imagData]
+    Spectrum2D:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        type:
+          $ref: '#/components/schemas/SpectrumType'
+        parsedParams:
+          $ref: '#/components/schemas/ParsedParams'
+        xLabel:
+          type: string
+        yLabel:
+          type: string
+        xData:
+          type: array
+          items:
+            type: number
+        yData:
+          type: array
+          items:
+            type: number
+        zData:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+      required: [id, filename, type, xLabel, yLabel, xData, yData, zData]
+    SpectrumData:
+      description: Inline data payload; in production consider signed URLs for large arrays
+      type: object
+      properties:
+        xData:
+          type: array
+          items:
+            type: number
+        realData:
+          type: array
+          items:
+            type: number
+        imagData:
+          type: array
+          items:
+            type: number
+        yData:
+          type: array
+          items:
+            type: number
+        zData:
+          type: array
+          items:
+            type: array
+            items:
+              type: number
+    Report:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        sampleId:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportItem'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, sampleId, items]
+    ReportItem:
+      type: object
+      properties:
+        id:
+          type: string
+        spectrumId:
+          type: string
+        view:
+          type: string
+          description: Plot type (e.g., 1d, rabi-trace, rabi-fft, rabi-scatter)
+        params:
+          type: object
+          description: Processing parameters snapshot
+      required: [id, spectrumId, view]
+    ReportCreate:
+      type: object
+      properties:
+        name:
+          type: string
+        sampleId:
+          type: string
+      required: [name, sampleId]
+    ReportItemCreate:
+      type: object
+      properties:
+        spectrumId:
+          type: string
+        view:
+          type: string
+        params:
+          type: object
+      required: [spectrumId, view]
+    ReportJob:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, done, failed]
+        error:
+          type: string
+        artifactUrl:
+          type: string
+          format: uri
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+    ProcessRequest:
+      type: object
+      properties:
+        fileIds:
+          type: array
+          items:
+            type: string
+      required: [fileIds]

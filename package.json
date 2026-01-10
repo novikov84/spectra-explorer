@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "build:test": "tsc -p tests/tsconfig.test.json",
-    "test": "npm run build:test && node tests/unit/reportState.cjs && node tests/unit/mockApi.mjs"
+    "test": "node scripts/run-tests.cjs",
+    "openapi:gen": "openapi-typescript openapi.yaml -o src/api/schema.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -77,6 +78,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "lovable-tagger": "^1.1.13",
+    "openapi-typescript": "^7.10.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",

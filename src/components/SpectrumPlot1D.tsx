@@ -130,6 +130,8 @@ export default function SpectrumPlot1D({
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
           <XAxis
             dataKey="x"
+            type="number"
+            domain={['auto', 'auto']}
             stroke="hsl(var(--muted-foreground))"
             fontSize={12}
             tickLine={false}
@@ -153,7 +155,7 @@ export default function SpectrumPlot1D({
               fontSize: 12,
             }}
           />
-          <Tooltip cursor={false} content={() => null} />
+          <Tooltip cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1 }} />
           <Legend
             wrapperStyle={{
               paddingTop: '20px',
@@ -170,6 +172,7 @@ export default function SpectrumPlot1D({
               stroke={colors[idx % colors.length]}
               strokeWidth={1.5}
               dot={false}
+              connectNulls
               activeDot={{ r: 3, fill: colors[idx % colors.length] }}
             />
           ))}
@@ -185,6 +188,7 @@ export default function SpectrumPlot1D({
                 strokeDasharray="5 5"
                 dot={false}
                 opacity={0.6}
+                connectNulls
               />
             ))}
         </LineChart>

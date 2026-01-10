@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { mockApi, SpectrumFile, SpectrumType } from '@/lib/mockApi';
+import { api } from '@/api/client';
+import { isBackendAvailable } from '@/api/backendStatus';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -35,7 +37,18 @@ export default function ArchiveContents() {
   const loadFiles = async () => {
     setIsLoading(true);
     try {
-      const data = await mockApi.getArchiveFiles(sampleId!);
+      let data: SpectrumFile[] | undefined;
+      const backendUp = await isBackendAvailable();
+      if (backendUp) {
+        try {
+          data = await api.listArchiveFiles(sampleId!);
+        } catch (err) {
+          data = undefined;
+        }
+      }
+      if (!data) {
+        data = await mockApi.getArchiveFiles(sampleId!);
+      }
       setFiles(data);
     } catch (error) {
       toast.error('Failed to load archive contents');
@@ -69,7 +82,17 @@ export default function ArchiveContents() {
 
     setIsProcessing(true);
     try {
-      await mockApi.processFiles(sampleId!, selectedFiles.map(f => f.id));
+      const ids = selectedFiles.map(f => f.id);
+      const backendUp = await isBackendAvailable();
+      if (backendUp) {
+        try {
+          await api.processFiles(sampleId!, ids);
+        } catch {
+          await mockApi.processFiles(sampleId!, ids);
+        }
+      } else {
+        await mockApi.processFiles(sampleId!, ids);
+      }
       toast.success('Processing complete');
       navigate(`/viewer/${sampleId}`);
     } catch (error) {

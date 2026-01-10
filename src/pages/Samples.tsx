@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { mockApi, Sample } from '@/lib/mockApi';
+import { api } from '@/api/client';
+import { isBackendAvailable } from '@/api/backendStatus';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FolderOpen, FlaskConical, LogOut, Loader2, Trash2, FileArchive } from 'lucide-react';
@@ -23,8 +25,14 @@ export default function Samples() {
   const loadSamples = async () => {
     setIsLoading(true);
     try {
-      const data = await mockApi.getSamples();
-      setSamples(data);
+      const backendUp = await isBackendAvailable();
+      if (backendUp) {
+        const data = await api.listSamples();
+        setSamples(data as Sample[]);
+      } else {
+        const data = await mockApi.getSamples();
+        setSamples(data);
+      }
     } catch (error) {
       toast.error('Failed to load samples');
     } finally {
@@ -43,9 +51,17 @@ export default function Samples() {
 
     setIsUploading(true);
     try {
-      const sample = await mockApi.uploadSample(file);
-      setSamples(prev => [...prev, sample]);
-      toast.success(`Uploaded: ${sample.name}`);
+      const backendUp = await isBackendAvailable();
+      if (backendUp) {
+        await api.uploadImport(file);
+        const refreshed = await api.listSamples();
+        setSamples(refreshed as Sample[]);
+        toast.success('Import started via backend');
+      } else {
+        const sample = await mockApi.uploadSample(file);
+        setSamples(prev => [...prev, sample]);
+        toast.success(`Uploaded: ${sample.name}`);
+      }
     } catch (error) {
       toast.error('Upload failed');
     } finally {
