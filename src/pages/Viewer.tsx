@@ -12,7 +12,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
-import { ArrowLeft, Loader2, LineChart, Trash2, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Loader2, LineChart, Trash2, BarChart3, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import SpectrumPlot1D from '@/components/SpectrumPlot1D';
 import SpectrumPlot2D from '@/components/SpectrumPlot2D';
@@ -21,63 +21,30 @@ import SpectrumPlotRabiCombined from '@/components/SpectrumPlotRabiCombined';
 
 const spectrumGroups: SpectrumType[] = ['CW', 'EDFS', 'T1', 'T2', 'Rabi', 'HYSCORE', '2D', 'Unknown'];
 
+interface ViewOptions {
+  normalize: boolean;
+  offset: boolean;
+  baseline: boolean;
+  showImag: boolean;
+}
+
+interface PlotGroup {
+  id: string;
+  type: SpectrumType;
+  spectra: (Spectrum1D | Spectrum2D)[];
+  viewOptions: ViewOptions;
+  twoDMode?: 'heatmap' | 'slices'; // Only for 2D
+}
+
 export default function Viewer() {
   const { sampleId } = useParams<{ sampleId: string }>();
   const navigate = useNavigate();
   const [spectra, setSpectra] = useState<(Spectrum1D | Spectrum2D)[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [plottedSpectra, setPlottedSpectra] = useState<(Spectrum1D | Spectrum2D)[]>([]);
-  const [viewOptions, setViewOptions] = useState<Record<string, {
-    normalize: boolean;
-    offset: boolean;
-    baseline: boolean;
-    showImag: boolean;
-  }>>({});
 
-  const getDefaultsForType = (type: string) => {
-    // EDFS defaults: Normalized + Shifted
-    if (type === 'EDFS') {
-      return {
-        normalize: true,
-        offset: true,
-        baseline: false,
-        showImag: false,
-      };
-    }
-    // T1/T2 defaults: Raw + Overlaid (offset=false)
-    if (type === 'T1' || type === 'T2') {
-      return {
-        normalize: false,
-        offset: false,
-        baseline: false,
-        showImag: false,
-      };
-    }
-    // General Default (CW, etc.)
-    return {
-      normalize: true,
-      offset: true,
-      baseline: false,
-      showImag: false,
-    };
-  };
-
-  const getViewOptions = (type: string) => {
-    return viewOptions[type] || getDefaultsForType(type);
-  };
-
-  const toggleOption = (type: string, key: 'normalize' | 'offset' | 'baseline' | 'showImag') => {
-    setViewOptions(prev => {
-      const current = prev[type] || getDefaultsForType(type);
-      return {
-        ...prev,
-        [type]: { ...current, [key]: !current[key] },
-      };
-    });
-  };
-
-  const [twoDMode, setTwoDMode] = useState<'heatmap' | 'slices'>('heatmap');
+  // Replaced single plottedSpectra with list of PlotGroups
+  const [plotGroups, setPlotGroups] = useState<PlotGroup[]>([]);
 
   useEffect(() => {
     if (sampleId) {
@@ -139,19 +106,77 @@ export default function Viewer() {
     });
   };
 
-  const handlePlotSelected = () => {
-    const selected = spectra.filter((s) => selectedIds.has(s.id));
-    if (selected.length === 0) {
-      toast.error('Please select spectra to plot');
-      return;
+  const getDefaultsForType = (type: string): ViewOptions => {
+    // EDFS defaults: Normalized + Shifted
+    if (type === 'EDFS') {
+      return {
+        normalize: true,
+        offset: true,
+        baseline: false,
+        showImag: false,
+      };
     }
-    setPlottedSpectra(selected);
-    toast.success(`Plotting ${selected.length} spectrum/spectra`);
+    // T1/T2 defaults: Raw + Overlaid (offset=false)
+    if (type === 'T1' || type === 'T2') {
+      return {
+        normalize: false,
+        offset: false,
+        baseline: false,
+        showImag: false,
+      };
+    }
+    // General Default (CW, etc.)
+    return {
+      normalize: true,
+      offset: true,
+      baseline: false,
+      showImag: false,
+    };
   };
 
-  const handleClearPlot = () => {
-    setPlottedSpectra([]);
-    setSelectedIds(new Set());
+  const handleCreatePlotGroup = (type: SpectrumType) => {
+    // Filter selected IDs that match this type
+    const selectedInGroup = groupedSpectra[type].filter(s => selectedIds.has(s.id));
+
+    if (selectedInGroup.length === 0) {
+      toast.error(`Please select at least one ${type} spectrum`);
+      return;
+    }
+
+    const newGroup: PlotGroup = {
+      id: crypto.randomUUID(),
+      type: type,
+      spectra: selectedInGroup,
+      viewOptions: getDefaultsForType(type),
+      twoDMode: 'heatmap'
+    };
+
+    setPlotGroups(prev => [...prev, newGroup]);
+    toast.success(`Created new ${type} plot panel with ${selectedInGroup.length} spectra`);
+  };
+
+  const handleRemoveGroup = (groupId: string) => {
+    setPlotGroups(prev => prev.filter(g => g.id !== groupId));
+  };
+
+  const updateGroupOption = (groupId: string, key: keyof ViewOptions) => {
+    setPlotGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      return {
+        ...g,
+        viewOptions: {
+          ...g.viewOptions,
+          [key]: !g.viewOptions[key]
+        }
+      };
+    }));
+  };
+
+  const updateGroup2DMode = (groupId: string, mode: 'heatmap' | 'slices') => {
+    setPlotGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      return { ...g, twoDMode: mode };
+    }));
   };
 
   const handleToggleGroup = (type: SpectrumType, select: boolean) => {
@@ -165,32 +190,6 @@ export default function Viewer() {
       return next;
     });
   };
-
-  const plottedRabi = plottedSpectra.filter(
-    (s): s is Spectrum1D => !is2DSpectrum(s) && s.type === 'Rabi',
-  );
-  const plotted1D = plottedSpectra.filter(
-    (s): s is Spectrum1D => !is2DSpectrum(s) && s.type !== 'Rabi',
-  );
-  const plotted2D = plottedSpectra.filter((s): s is Spectrum2D => is2DSpectrum(s));
-
-  const grouped1DByType: Record<SpectrumType, Spectrum1D[]> = useMemo(() => {
-    const groups: Record<SpectrumType, Spectrum1D[]> = {
-      CW: [],
-      EDFS: [],
-      T1: [],
-      T2: [],
-      Rabi: [],
-      HYSCORE: [],
-      '2D': [],
-      Unknown: [],
-    };
-    plotted1D.forEach(s => {
-      groups[s.type] = groups[s.type] || [];
-      groups[s.type].push(s);
-    });
-    return groups;
-  }, [plotted1D]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -209,14 +208,14 @@ export default function Viewer() {
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-semibold">Spectrum Viewer</h1>
             <div className="flex gap-2">
-              <Button onClick={handlePlotSelected} disabled={selectedIds.size === 0}>
-                <LineChart className="w-4 h-4 mr-2" />
-                Plot Selected ({selectedIds.size})
-              </Button>
-              {plottedSpectra.length > 0 && (
-                <Button variant="outline" onClick={handleClearPlot}>
+              {/* 
+                We removed the global "Plot Selected" button in favor of per-type plotting.
+                Maybe keeping a "Clear All" is useful.
+               */}
+              {plotGroups.length > 0 && (
+                <Button variant="outline" onClick={() => setPlotGroups([])}>
                   <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Plot
+                  Clear All Plots
                 </Button>
               )}
             </div>
@@ -247,6 +246,9 @@ export default function Viewer() {
                       const groupSpectra = groupedSpectra[type];
                       if (groupSpectra.length === 0) return null;
 
+                      // Count selected in this group
+                      const selectedInType = groupSpectra.filter(s => selectedIds.has(s.id)).length;
+
                       return (
                         <AccordionItem key={type} value={type} className="border-border/50">
                           <AccordionTrigger className="px-4 hover:no-underline hover:bg-secondary/30">
@@ -258,7 +260,27 @@ export default function Viewer() {
                             </div>
                           </AccordionTrigger>
                           <AccordionContent className="pb-0">
-                            <div className="flex justify-end gap-2 px-4 pb-2 text-xs">
+                            {/* Action Bar for Type */}
+                            <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-secondary/10">
+                              <div className="text-xs text-muted-foreground">
+                                {selectedInType} selected
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 text-xs"
+                                disabled={selectedInType === 0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCreatePlotGroup(type);
+                                }}
+                              >
+                                <Plus className="w-3 h-3 mr-1" />
+                                Plot
+                              </Button>
+                            </div>
+
+                            <div className="flex justify-end gap-2 px-4 py-2 text-xs">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -312,124 +334,121 @@ export default function Viewer() {
 
             {/* Plot Area */}
             <div className="lg:col-span-2 space-y-6">
-              {plottedSpectra.length === 0 ? (
+              {plotGroups.length === 0 ? (
                 <Card className="border-border/50 border-dashed">
                   <CardContent className="py-24 text-center text-muted-foreground">
                     <LineChart className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                    <p className="text-lg mb-2">No spectra plotted</p>
+                    <p className="text-lg mb-2">No active plots</p>
                     <p className="text-sm">
-                      Select spectra from the list and click "Plot Selected"
+                      Select spectra on the left and click "Plot" to add a panel.
                     </p>
                   </CardContent>
                 </Card>
               ) : (
-                <>
-                  {/* 1D Plots by type (excluding Rabi) */}
-                  {spectrumGroups
-                    .filter(t => t !== 'Rabi' && t !== '2D' && t !== 'HYSCORE')
-                    .map(type => {
-                      const list = grouped1DByType[type];
-                      if (!list || list.length === 0) return null;
+                plotGroups.map(group => {
+                  const { id, type, spectra: groupSpectra, viewOptions, twoDMode } = group;
 
-                      const opts = getViewOptions(type);
+                  // Determine component based on type
+                  const isRabi = type === 'Rabi';
+                  const is2D = type === '2D' || is2DSpectrum(groupSpectra[0]);
 
-                      return (
-                        <Card key={`group-${type}`} className="border-border/50">
-                          <CardHeader>
-                            <div className="flex items-center justify-between gap-4">
-                              <CardTitle className="text-lg">{type} Spectra</CardTitle>
-                              <div className="flex gap-2 flex-wrap">
-                                <Button
-                                  variant={opts.normalize ? 'default' : 'outline'}
-                                  size="sm"
-                                  onClick={() => toggleOption(type, 'normalize')}
-                                >
-                                  {opts.normalize ? 'Normalized' : 'Raw scale'}
-                                </Button>
-                                <Button
-                                  variant={opts.offset ? 'default' : 'outline'}
-                                  size="sm"
-                                  onClick={() => toggleOption(type, 'offset')}
-                                >
-                                  {opts.offset ? 'Shifted' : 'Overlaid'}
-                                </Button>
-                                <Button
-                                  variant={opts.baseline ? 'default' : 'outline'}
-                                  size="sm"
-                                  onClick={() => toggleOption(type, 'baseline')}
-                                >
-                                  {opts.baseline ? 'Baseline On' : 'Baseline Off'}
-                                </Button>
-                                <Button
-                                  variant={opts.showImag ? 'default' : 'outline'}
-                                  size="sm"
-                                  onClick={() => toggleOption(type, 'showImag')}
-                                >
-                                  {opts.showImag ? 'Hide Imag' : 'Show Imag'}
-                                </Button>
-                              </div>
-                            </div>
-                          </CardHeader>
-                          <CardContent>
-                            <SpectrumPlot1D
-                              spectra={list}
-                              showImag={opts.showImag}
-                              baselineCorrect={opts.baseline}
-                              normalize={opts.normalize}
-                              offset={opts.offset}
-                            />
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-
-                  {plottedRabi.length > 0 && (
-                    <Card className="border-border/50">
-                      <CardHeader>
-                        <CardTitle className="text-lg">Rabi Analysis</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-6">
-                        <SpectrumPlotRabiCombined spectra={plottedRabi} />
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {/* 2D Plots */}
-                  {plotted2D.length > 0 && (
-                    <Card className="border-border/50">
+                  return (
+                    <Card key={id} className="border-border/50 relative group">
                       <CardHeader>
                         <div className="flex items-center justify-between gap-4">
-                          <CardTitle className="text-lg">2D Spectra</CardTitle>
-                          <div className="flex gap-2">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            {type} Analysis
+                            {isRabi && <span className="text-xs font-normal text-muted-foreground">(Combined)</span>}
+                          </CardTitle>
+
+                          <div className="flex gap-2 items-center flex-wrap">
+                            {/* Controls for standard 1D */}
+                            {!isRabi && !is2D && (
+                              <>
+                                <Button
+                                  variant={viewOptions.normalize ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => updateGroupOption(id, 'normalize')}
+                                >
+                                  {viewOptions.normalize ? 'Normalized' : 'Raw scale'}
+                                </Button>
+                                <Button
+                                  variant={viewOptions.offset ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => updateGroupOption(id, 'offset')}
+                                >
+                                  {viewOptions.offset ? 'Shifted' : 'Overlaid'}
+                                </Button>
+                                <Button
+                                  variant={viewOptions.baseline ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => updateGroupOption(id, 'baseline')}
+                                >
+                                  {viewOptions.baseline ? 'Base On' : 'Base Off'}
+                                </Button>
+                                <Button
+                                  variant={viewOptions.showImag ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => updateGroupOption(id, 'showImag')}
+                                >
+                                  {viewOptions.showImag ? 'Hide Imag' : 'Show Imag'}
+                                </Button>
+                              </>
+                            )}
+
+                            {/* Controls for 2D */}
+                            {is2D && (
+                              <>
+                                <Button
+                                  variant={twoDMode === 'heatmap' ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => updateGroup2DMode(id, 'heatmap')}
+                                >
+                                  Heatmap
+                                </Button>
+                                <Button
+                                  variant={twoDMode === 'slices' ? 'default' : 'outline'}
+                                  size="sm"
+                                  onClick={() => updateGroup2DMode(id, 'slices')}
+                                >
+                                  1D Slices
+                                </Button>
+                              </>
+                            )}
+
                             <Button
-                              variant={twoDMode === 'heatmap' ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setTwoDMode('heatmap')}
+                              variant="ghost"
+                              size="icon"
+                              className="ml-2 text-muted-foreground hover:text-destructive"
+                              onClick={() => handleRemoveGroup(id)}
                             >
-                              Heatmap
-                            </Button>
-                            <Button
-                              variant={twoDMode === 'slices' ? 'default' : 'outline'}
-                              size="sm"
-                              onClick={() => setTwoDMode('slices')}
-                            >
-                              1D Slices
+                              <Trash2 className="w-4 h-4" />
                             </Button>
                           </div>
                         </div>
                       </CardHeader>
-                      <CardContent className="space-y-6">
-                        {twoDMode === 'heatmap'
-                          ? plotted2D.map((spectrum) => (
-                            <SpectrumPlot2D key={spectrum.id} spectrum={spectrum} />
-                          ))
-                          : plotted2D.map((spectrum) => (
-                            <SpectrumPlot2DSlices key={spectrum.id} spectrum={spectrum} />
-                          ))}
+                      <CardContent>
+                        {isRabi ? (
+                          <SpectrumPlotRabiCombined spectra={groupSpectra as Spectrum1D[]} />
+                        ) : is2D ? (
+                          twoDMode === 'heatmap' ? (
+                            groupSpectra.map(s => <SpectrumPlot2D key={s.id} spectrum={s as Spectrum2D} />)
+                          ) : (
+                            groupSpectra.map(s => <SpectrumPlot2DSlices key={s.id} spectrum={s as Spectrum2D} />)
+                          )
+                        ) : (
+                          <SpectrumPlot1D
+                            spectra={groupSpectra as Spectrum1D[]}
+                            showImag={viewOptions.showImag}
+                            baselineCorrect={viewOptions.baseline}
+                            normalize={viewOptions.normalize}
+                            offset={viewOptions.offset}
+                          />
+                        )}
                       </CardContent>
                     </Card>
-                  )}
-                </>
+                  );
+                })
               )}
             </div>
           </div>
