@@ -83,11 +83,12 @@ export default function SpectrumPlot1D({
 
     // Only change label if we detected a unit change or generic time
     let newLabel = firstLabel;
-    if (newLabel.includes('(ns)')) {
-      newLabel = newLabel.replace('(ns)', `(${unit})`);
-    } else {
-      newLabel = `${newLabel} (${unit})`;
-    }
+
+    // Remove any existing parenthesis unit if present (e.g. "Time (ns)" -> "Time")
+    newLabel = newLabel.replace(/\s*\(.*?\)/, '');
+
+    // Append the correct unit
+    newLabel = `${newLabel} (${unit})`;
 
     return { timeScale: scale, timeUnit: unit, xLabel: newLabel };
   }, [spectra]);
@@ -398,7 +399,7 @@ export default function SpectrumPlot1D({
           {processedData.map((spectrum, idx) => (
             <Line
               key={`${spectrum.id}-real`}
-              type="step"
+              type="monotone"
               dataKey={`real_${idx}`}
               name={`${getLegendLabel(spectrum)} (Real)`}
               stroke={colors[idx % colors.length]}
@@ -413,7 +414,7 @@ export default function SpectrumPlot1D({
             processedData.map((spectrum, idx) => (
               <Line
                 key={`${spectrum.id}-imag`}
-                type="step"
+                type="monotone"
                 dataKey={`imag_${idx}`}
                 name={`${getLegendLabel(spectrum)} (Imag)`}
                 stroke={colors[idx % colors.length]}

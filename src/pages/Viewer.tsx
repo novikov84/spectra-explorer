@@ -24,7 +24,7 @@ import SpectrumPlot1D from '@/components/SpectrumPlot1D';
 import SpectrumPlot2D from '@/components/SpectrumPlot2D';
 import SpectrumPlot2DSlices from '@/components/SpectrumPlot2DSlices';
 import SpectrumPlotRabiCombined from '@/components/SpectrumPlotRabiCombined';
-import { getSpectrumLabel } from '@/lib/spectrumUtils';
+import { getSpectrumLabel, sortSpectra } from '@/lib/spectrumUtils';
 
 // DnD Imports
 import {
@@ -124,6 +124,11 @@ export default function Viewer() {
 
     spectra.forEach((spectrum) => {
       groups[spectrum.type].push(spectrum);
+    });
+
+    // Sort each group
+    Object.keys(groups).forEach(key => {
+      groups[key as SpectrumType].sort(sortSpectra);
     });
 
     return groups;

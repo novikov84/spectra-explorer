@@ -95,7 +95,7 @@ def parse_params_from_name(raw_name: str) -> dict:
             params['temperatureK'] = float(m.group(1).replace('p', '.'))
         if m := re.match(r'(\d+(?:[p\.]\d+)?)g', lower):
             params['fieldG'] = float(m.group(1).replace('p', '.'))
-        if m := re.match(r'hpa(\d+(?:[p\.]\d+)?)db', lower):
+        if m := re.match(r'(?:hpa)?(\d+(?:[p\.]\d+)?)db', lower):
             params['amplifierDb'] = float(m.group(1).replace('p', '.'))
         if m := re.match(r'p(\d+(?:[p\.]\d+)?)', lower):
             params['pulseWidth'] = float(m.group(1).replace('p', '.'))
