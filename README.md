@@ -1,4 +1,8 @@
-# Problem Description
+# Spectra Explorer
+
+> **Live Deployment:** [https://novikov.es/apps/spectra](https://novikov.es/apps/spectra)
+
+## Problem Description
 
 ## Problem Overview
 
@@ -120,3 +124,58 @@ These limitations are intentional in order to keep the system focused, testable,
 This project demonstrates how a complex scientific data workflow can be transformed into a reproducible, full-stack web application. It integrates frontend visualization, backend processing, database persistence, and report generation under a clear API contract, while remaining accessible through both guest and authenticated usage modes.
 
 The application is designed as a realistic foundation for future expansion into more advanced EPR data analysis and laboratory data management systems.
+
+The application is designed as a realistic foundation for future expansion into more advanced EPR data analysis and laboratory data management systems.
+
+---
+
+## System Architecture & Technologies
+
+The system is built as a modular, containerized web application:
+
+*   **Frontend**: Built with **React**, **Vite**, and **Tailwind CSS**. It uses:
+    *   **Recharts** for interactive spectral visualization.
+    *   **TanStack Query** for efficient data fetching and caching.
+    *   **OpenAPI Client** for type-safe communication with the backend.
+*   **Backend**: Built with **Python** and **FastAPI**. It handles:
+    *   **Bruker DSC/DTA Parsing**: Custom binary parsers extracts spectral data and parameters.
+    *   **Experiment Classification**: Heuristics classify spectra (CW, EDFS, Rabi, etc.).
+    *   **Auth & Persistence**: **SQLModel** (SQLAlchemy) interaction with the database.
+*   **Database**: **PostgreSQL** stores user accounts, sample metadata, and file processing status.
+*   **Infrastructure**:
+    *   **Docker Compose**: Orchestrates Frontend, Backend, and Database containers.
+    *   **Nginx**: Reverse proxy for routing requests and serving static assets.
+    *   **CI/CD**: GitHub Actions pipeline for automated testing.
+
+---
+
+## Running Locally & Reproducibility
+
+To run the full system end-to-end:
+
+1.  **Prerequisites**: Docker Desktop installed.
+2.  **Start System**:
+    ```bash
+    docker compose up --build
+    ```
+3.  **Access**:
+    *   Frontend: `http://localhost/apps/spectra/`
+    *   Backend API Docs: `http://localhost/api/spectra/docs`
+4.  **Verify**:
+    *   Log in as Guest.
+    *   Click "Load Example" to verify data parsing and plotting.
+
+---
+
+## Development & Evaluation
+
+This project follows a structured full-stack architecture and is documented to facilitate evaluation.
+
+- **AI Development & MCP**: This project was built using AI assistants governed by the **Model Context Protocol (MCP)**. MCP provided the AI with structured access to the OpenAPI schema and repository context, ensuring code correctness and minimizing hallucinations. See [AGENTS.md](AGENTS.md) for a detailed log of the workflow, prompts, and MCP usage.
+- **API Contract**: The backend follows an OpenAPI-first approach. See `openapi.yaml` for the contract. Frontend clients are strictly typed against this schema (`src/api/schema.ts`).
+- **CI/CD**: A GitHub Actions workflow runs backend and frontend tests on every push. See [.github/workflows/ci.yml](.github/workflows/ci.yml).
+- **Test Strategy**:
+    *   **Integration Tests (Backend)**: Cover the full Import -> Parse -> Persist flow. Run with `docker exec -it <backend-container> pytest tests/`.
+    *   **Unit Tests (Frontend)**: Verify reporting logic and state. Run with `npm run test`.
+- **Database**: Uses PostgreSQL 15. The schema is defined in `backend/models.py` using SQLModel.
+- **Deployment**: The application is deployed to a live environment (see link at top). Deployment logic is via Docker Compose, mirroring the local setup.

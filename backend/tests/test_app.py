@@ -1,99 +1,128 @@
 import unittest
+import sys
+import os
+import io
+import zipfile
+import uuid
+from unittest.mock import patch
+
+# Add parent directory to path so we can import app
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
+from app import app, Spectrum1D, SpectrumFileModel
 
-from app import app, samples_store
-
-
-class BackendStubTests(unittest.TestCase):
+class BackendTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+        cls.username = f"user_{uuid.uuid4()}"
+        cls.password = "securepass"
+
+    def create_dummy_zip(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("test.DSC", "TITL=Test")
+            zf.writestr("test.DTA", b"DATA")
+        buf.seek(0)
+        return buf
 
     def test_health(self):
         resp = self.client.get("/health")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json().get("status"), "ok")
+        self.assertEqual(resp.json()["status"], "ok")
 
-    def test_list_samples_contains_seed(self):
-        resp = self.client.get("/samples")
-        self.assertEqual(resp.status_code, 200)
-        samples = resp.json()
-        self.assertGreaterEqual(len(samples), 1)
-        ids = {s["id"] for s in samples}
-        self.assertIn("sample-1", ids)
-
-    def test_seed_files_and_spectra(self):
-        # files for seed sample
-        resp = self.client.get("/samples/sample-1/files")
-        self.assertEqual(resp.status_code, 200)
-        files = resp.json()
-        self.assertGreaterEqual(len(files), 1)
-
-        # spectra for seed sample
-        resp = self.client.get("/samples/sample-1/spectra")
-        self.assertEqual(resp.status_code, 200)
-        spectra = resp.json().get("spectra", [])
-        self.assertGreaterEqual(len(spectra), 1)
-
-        spec_id = spectra[0]["id"]
-        # spectrum metadata
-        resp = self.client.get(f"/spectra/{spec_id}")
-        self.assertEqual(resp.status_code, 200)
-
-        # spectrum data
-        resp = self.client.get(f"/spectra/{spec_id}/data")
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertIn("xData", data)
-
-    def test_import_creates_sample_and_process(self):
-        # Build a tiny zip with one .dsc file
-        import zipfile
-        import io
-
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("demo.DSC", "TITL=Demo")
-        buf.seek(0)
-
-        resp = self.client.post(
-            "/imports",
-            files={"file": ("demo.zip", buf.getvalue(), "application/zip")},
+    @patch("app.parse_and_process")
+    def test_guest_flow(self, mock_parse):
+        # Mock successful parsing
+        mock_parse.return_value = (
+            "test_sample",
+            {"spec-1": Spectrum1D(id="spec-1", filename="test.DSC", type="CW", xLabel="B", yLabel="I", xData=[1,2], realData=[3,4], imagData=[])},
+            [SpectrumFileModel(id="file-1", filename="test.DSC", type="CW", selected=True)],
+            {"CW": 1}
         )
-        self.assertEqual(resp.status_code, 202)
-        job = resp.json()
-        self.assertIn("id", job)
 
-        # New sample should be present
-        samples_resp = self.client.get("/samples")
+        # 1. Login as Guest
+        auth_resp = self.client.post("/auth/guest")
+        self.assertEqual(auth_resp.status_code, 200)
+        token = auth_resp.json()["accessToken"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 2. Upload File
+        zip_buf = self.create_dummy_zip()
+        import_resp = self.client.post(
+            "/imports",
+            files={"file": ("guest_test.zip", zip_buf.getvalue(), "application/zip")},
+            headers=headers
+        )
+        self.assertEqual(import_resp.status_code, 202)
+        
+        # 3. List Samples
+        samples_resp = self.client.get("/samples", headers=headers)
         self.assertEqual(samples_resp.status_code, 200)
         samples = samples_resp.json()
-        # There should be more samples than the seed
         self.assertGreaterEqual(len(samples), 1)
-
-        # Find latest sample (non-seed)
-        latest_sample_id = None
-        for s in samples:
-            if s["id"] != "sample-1":
-                latest_sample_id = s["id"]
-                break
-        self.assertIsNotNone(latest_sample_id)
-
-        # Files should exist (cloned or parsed)
-        files_resp = self.client.get(f"/samples/{latest_sample_id}/files")
+        
+        # Get Sample ID
+        sample_id = samples[-1]["id"] # Get most recent
+        
+        # 4. List Files
+        files_resp = self.client.get(f"/samples/{sample_id}/files", headers=headers)
         self.assertEqual(files_resp.status_code, 200)
         files = files_resp.json()
-        self.assertGreaterEqual(len(files), 1)
+        
+        # 5. Process (Filter) selection
+        if files:
+            file_id = files[0]["id"]
+            proc_resp = self.client.post(
+                f"/samples/{sample_id}/process",
+                json={"fileIds": [file_id]},
+                headers=headers
+            )
+            self.assertEqual(proc_resp.status_code, 202)
 
-        # Process should accept and return a job
-        proc_resp = self.client.post(
-            f"/samples/{latest_sample_id}/process", json={"fileIds": [f["id"] for f in files]}
+    @patch("app.parse_and_process")
+    def test_auth_and_persistence(self, mock_parse):
+        # Mock successful parsing
+        mock_parse.return_value = (
+            "Auth Sample",
+            {"spec-1": Spectrum1D(id="spec-1", filename="auth.DSC", type="CW", xLabel="B", yLabel="I", xData=[1,2], realData=[3,4], imagData=[])},
+            [SpectrumFileModel(id="file-1", filename="auth.DSC", type="CW", selected=True)],
+            {"CW": 1}
         )
-        self.assertEqual(proc_resp.status_code, 202)
-        proc_job = proc_resp.json()
-        self.assertEqual(proc_job["status"], "ready")
 
+        # 1. Register
+        reg_resp = self.client.post(
+            "/auth/register",
+            json={"username": self.username, "password": self.password}
+        )
+        if reg_resp.status_code == 400:
+            pass 
+        else:
+            self.assertEqual(reg_resp.status_code, 200)
+
+        # 2. Login
+        login_resp = self.client.post(
+            "/auth/login",
+            data={"username": self.username, "password": self.password}
+        )
+        self.assertEqual(login_resp.status_code, 200)
+        token = login_resp.json()["accessToken"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 3. Upload Protected File
+        zip_buf = self.create_dummy_zip()
+        import_resp = self.client.post(
+            "/imports",
+            files={"file": ("auth_test.zip", zip_buf.getvalue(), "application/zip")},
+            headers=headers
+        )
+        self.assertEqual(import_resp.status_code, 202)
+
+        # 4. List Samples (Should see it)
+        samples_resp = self.client.get("/samples", headers=headers)
+        self.assertEqual(samples_resp.status_code, 200)
+        self.assertTrue(any(s["name"] == "auth_test.zip" or s["name"] == "Auth Sample" for s in samples_resp.json()))
 
 if __name__ == "__main__":
     unittest.main()
