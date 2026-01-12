@@ -20,7 +20,7 @@ const App = () => (
       <AuthProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter basename="/apps/spectra">
           <Routes>
             <Route path="/" element={<Index />} />
             <Route

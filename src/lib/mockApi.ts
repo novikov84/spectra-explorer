@@ -406,9 +406,9 @@ async function parseZipArchive(file: File | Blob | ArrayBuffer | Uint8Array) {
 }
 
 async function loadExampleZip(): Promise<File> {
-  const response = await fetch('/Export.zip');
+  const response = await fetch('/apps/spectra/Example.zip');
   if (!response.ok) {
-    throw new Error('Example archive /Export.zip not found. Please place it in /public.');
+    throw new Error('Example archive Example.zip not found.');
   }
   const blob = await response.blob();
   return new File([blob], 'Export.zip', { type: 'application/zip' });

@@ -181,6 +181,11 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/")
+def root():
+    return {"message": "Spectra Explorer Backend API"}
+
+
 @app.post("/auth/guest", response_model=AuthResponse)
 def guest():
     return AuthResponse(accessToken="guest-token")
