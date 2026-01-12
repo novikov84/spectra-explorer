@@ -11,7 +11,7 @@ import {
   ReferenceArea,
 } from 'recharts';
 import { Card } from '@/components/ui/card';
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 
 interface SpectrumPlot1DProps {
   spectra: Spectrum1D[];
@@ -39,6 +39,24 @@ export default function SpectrumPlot1D({
   // domains: ['auto', 'auto'] or [min, max]
   const [xDomain, setXDomain] = useState<[number | string, number | string]>(['auto', 'auto']);
   const [yDomain, setYDomain] = useState<[number | string, number | string]>(['auto', 'auto']);
+
+  // --- Legend & Layout State ---
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
+  const [containerWidth, setContainerWidth] = useState<number>(800);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
 
   const colors = [
     'hsl(var(--chart-1))',
@@ -259,21 +277,65 @@ export default function SpectrumPlot1D({
     };
   }, [refAreaLeft, refAreaRight]); // Dependencies ensure zoom sees current state
 
-  const chartMargin = { top: 10, right: 30, left: 20, bottom: 40 };
+  // Responsive Margins
+  const chartMargin = useMemo(() => {
+    const base = { top: 10, right: 30, left: 20, bottom: 40 };
+    if (containerWidth < 600) {
+      // Increase bottom margin to avoid legend overlapping axis label
+      return { ...base, bottom: 100 };
+    }
+    return base;
+  }, [containerWidth]);
 
   // Helper to generate legend label
   const getLegendLabel = (s: Spectrum1D) => {
     const base = getSpectrumLabel(s);
-    // The suffix (Real/Imag) is added directly in the <Line> component's `name` prop,
-    // so this function should just return the base label.
     return base;
   };
 
-  // Dynamic Legend Postioning based on Spectrum Type
-  // T1 -> Bottom Right
-  // T2 -> Top Right
+  // Dynamic Legend Postioning based on Spectrum Type & Width
+  // T1 -> Bottom Right (if wide)
+  // T2 -> Top Right (if wide)
+  // Narrow -> Bottom Center
   const legendProps = useMemo(() => {
-    if (!spectra || spectra.length === 0) return {};
+    // Handler for Legend Click
+    const handleLegendClick = (e: any) => {
+      const { dataKey } = e; // dataKey is like "real_0" or "imag_0"
+      if (!dataKey) return;
+
+      setHiddenSeries((prev) => {
+        const next = new Set(prev);
+        if (next.has(dataKey)) {
+          next.delete(dataKey);
+        } else {
+          next.add(dataKey);
+        }
+        return next;
+      });
+    };
+
+    const commonProps = {
+      onClick: handleLegendClick,
+      cursor: 'pointer',
+      wrapperStyle: { cursor: 'pointer' }
+    };
+
+    if (!spectra || spectra.length === 0) return { ...commonProps };
+
+    // Responsive: Move to bottom if narrow
+    if (containerWidth < 600) {
+      return {
+        ...commonProps,
+        layout: 'horizontal' as const,
+        verticalAlign: 'bottom' as const,
+        align: 'center' as const,
+        wrapperStyle: {
+          paddingTop: '40px', // Push legend down further
+          cursor: 'pointer'
+        }
+      };
+    }
+
     const type = spectra[0].type;
 
     // Common styles for overlaid legend
@@ -282,13 +344,15 @@ export default function SpectrumPlot1D({
       padding: '10px',
       border: '1px solid hsl(var(--border))',
       borderRadius: '6px',
-      position: 'absolute' as const, // Force overlay, cast to const for correct type
+      position: 'absolute' as const,
       zIndex: 10,
       fontSize: '12px',
+      cursor: 'pointer',
     };
 
     if (type === 'T1') {
       return {
+        ...commonProps,
         layout: 'vertical' as const,
         verticalAlign: 'bottom' as const,
         align: 'right' as const,
@@ -303,6 +367,7 @@ export default function SpectrumPlot1D({
     }
     if (type === 'T2' || type === 'EDFS') {
       return {
+        ...commonProps,
         layout: 'vertical' as const,
         verticalAlign: 'top' as const,
         align: 'right' as const,
@@ -317,13 +382,14 @@ export default function SpectrumPlot1D({
     }
     // Default
     return {
-      wrapperStyle: { paddingTop: '20px' }
+      ...commonProps,
+      wrapperStyle: { paddingTop: '20px', cursor: 'pointer' }
     };
-
-  }, [spectra]);
+  }, [spectra, containerWidth]);
 
   return (
     <div
+      ref={containerRef}
       className="w-full h-[400px] select-none"
       onMouseDown={(e) => {
         // Robust margin click handling using container coordinates
@@ -401,12 +467,13 @@ export default function SpectrumPlot1D({
               key={`${spectrum.id}-real`}
               type="monotone"
               dataKey={`real_${idx}`}
-              name={`${getLegendLabel(spectrum)} (Real)`}
+              name={`${getLegendLabel(spectrum)}${showImag ? ' (Real)' : ''}`}
               stroke={colors[idx % colors.length]}
               strokeWidth={1.5}
               dot={false}
               connectNulls
               isAnimationActive={false}
+              hide={hiddenSeries.has(`real_${idx}`)}
             />
           ))}
 
@@ -423,6 +490,7 @@ export default function SpectrumPlot1D({
                 dot={false}
                 connectNulls
                 isAnimationActive={false}
+                hide={hiddenSeries.has(`imag_${idx}`)}
               />
             ))}
 
