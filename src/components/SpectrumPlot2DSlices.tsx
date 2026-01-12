@@ -1,4 +1,4 @@
-import { Spectrum2D } from '@/lib/mockApi';
+import { Spectrum2D } from '@/api/client';
 import {
   LineChart,
   Line,

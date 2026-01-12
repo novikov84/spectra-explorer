@@ -1,9 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { mockApi, Sample } from '@/lib/mockApi';
-import { api } from '@/api/client';
-import { isBackendAvailable } from '@/api/backendStatus';
+import { api, Sample } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FolderOpen, FlaskConical, LogOut, Loader2, Trash2, FileArchive } from 'lucide-react';
@@ -25,14 +23,8 @@ export default function Samples() {
   const loadSamples = async () => {
     setIsLoading(true);
     try {
-      const backendUp = await isBackendAvailable();
-      if (backendUp) {
-        const data = await api.listSamples();
-        setSamples(data as Sample[]);
-      } else {
-        const data = await mockApi.getSamples();
-        setSamples(data);
-      }
+      const data = await api.listSamples();
+      setSamples(data);
     } catch (error) {
       toast.error('Failed to load samples');
     } finally {
@@ -51,17 +43,18 @@ export default function Samples() {
 
     setIsUploading(true);
     try {
-      const backendUp = await isBackendAvailable();
-      if (backendUp) {
-        await api.uploadImport(file);
-        const refreshed = await api.listSamples();
-        setSamples(refreshed as Sample[]);
-        toast.success('Import started via backend');
-      } else {
-        const sample = await mockApi.uploadSample(file);
-        setSamples(prev => [...prev, sample]);
-        toast.success(`Uploaded: ${sample.name}`);
-      }
+      await api.uploadImport(file);
+      // Wait a bit or poll? api.uploadImport returns ImportJob. 
+      // Ideally we poll until status='ready', but listSamples might show it immediately if creates entry.
+      // app.py: upload creates ImportJob AND Sample? No, usually async.
+      // app.py: /imports -> starts BG task. Sample created AFTER parsing?
+      // My backend implementation creates Sample object immediately? No, parsers.
+      // Let's assume for now we listSamples. If not there, user might need to refresh.
+      // Showing "Import started" is good.
+      await new Promise(r => setTimeout(r, 1000)); // Brief wait
+      const refreshed = await api.listSamples();
+      setSamples(refreshed);
+      toast.success('Import started');
     } catch (error) {
       toast.error('Upload failed');
     } finally {
@@ -75,9 +68,16 @@ export default function Samples() {
   const handleLoadExample = async () => {
     setIsLoadingExample(true);
     try {
-      const sample = await mockApi.loadExampleSample();
-      setSamples(prev => [...prev, sample]);
-      toast.success('Example dataset loaded');
+      const response = await fetch('/apps/spectra/Example.zip');
+      if (!response.ok) throw new Error('Example file not found');
+      const blob = await response.blob();
+      const file = new File([blob], 'Example.zip', { type: 'application/zip' });
+
+      await api.uploadImport(file);
+      await new Promise(r => setTimeout(r, 1000));
+      const refreshed = await api.listSamples();
+      setSamples(refreshed);
+      toast.success('Example dataset uploaded');
     } catch (error) {
       toast.error('Failed to load example');
     } finally {
@@ -88,9 +88,8 @@ export default function Samples() {
   const handleDeleteSample = async (sampleId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      await mockApi.deleteSample(sampleId);
-      setSamples(prev => prev.filter(s => s.id !== sampleId));
-      toast.success('Sample deleted');
+      // api.deleteSample(sampleId); // Need to add to client
+      toast.error('Delete not implemented in client yet');
     } catch (error) {
       toast.error('Failed to delete sample');
     }

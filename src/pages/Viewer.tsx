@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { mockApi, Spectrum1D, Spectrum2D, SpectrumType, is2DSpectrum } from '@/lib/mockApi';
-import { api } from '@/api/client';
-import { isBackendAvailable } from '@/api/backendStatus';
+import { is2DSpectrum } from '@/lib/mockApi'; // Keep utility
+import { api, Spectrum1D, Spectrum2D, SpectrumType } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -90,19 +89,8 @@ export default function Viewer() {
   const loadSpectra = async () => {
     setIsLoading(true);
     try {
-      let data: (Spectrum1D | Spectrum2D)[] | undefined;
-      const backendUp = await isBackendAvailable();
-      if (backendUp) {
-        try {
-          data = await api.listSpectra(sampleId!);
-        } catch (err) {
-          data = undefined;
-        }
-      }
-      if (!data) {
-        data = await mockApi.getProcessedSpectra(sampleId!);
-      }
-      setSpectra(data);
+      const data = await api.listSpectra(sampleId!);
+      setSpectra(data || []);
     } catch (error) {
       toast.error('Failed to load spectra');
     } finally {

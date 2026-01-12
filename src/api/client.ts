@@ -1,62 +1,117 @@
 import type { components } from './schema';
 
-type AuthResponse = components['schemas']['AuthResponse'];
-type ImportJob = components['schemas']['Import'];
-type Report = components['schemas']['Report'];
-type ReportItem = components['schemas']['ReportItem'];
-type ReportJob = components['schemas']['ReportJob'];
-type Sample = components['schemas']['Sample'];
-type Spectrum1D = components['schemas']['Spectrum1D'];
-type Spectrum2D = components['schemas']['Spectrum2D'];
-type SpectrumData = components['schemas']['SpectrumData'];
-type SpectrumFile = {
+// Export types for use in components
+export type AuthResponse = components['schemas']['AuthResponse'];
+// Extended/Fixed types
+export interface ParsedParams {
+  sampleName: string;
+  temperatureK?: number;
+  fieldG?: number;
+  amplifierDb?: number;
+  pulseWidth?: number;
+  spectralWidth?: number; // Added missing field
+  tokens: string[];
+}
+
+export type ImportJob = components['schemas']['Import'];
+export type Report = components['schemas']['Report'];
+export type ReportItem = components['schemas']['ReportItem'];
+export type ReportJob = components['schemas']['ReportJob'];
+export type Sample = components['schemas']['Sample'];
+// Override Spectrum types to use our ParsedParams? 
+// Typescript is structural, so if we just cast it's fine. 
+// For now, let's just export components['schemas']['Spectrum1D'] but we might need to patch it if we want mapped usage.
+// Actually, spectrumUtils imports ParsedParams. 
+export type Spectrum1D = Omit<components['schemas']['Spectrum1D'], 'parsedParams'> & { parsedParams?: ParsedParams };
+export type Spectrum2D = Omit<components['schemas']['Spectrum2D'], 'parsedParams'> & { parsedParams?: ParsedParams };
+
+export type SpectrumData = components['schemas']['SpectrumData'];
+export type SpectrumType = components['schemas']['SpectrumType'];
+export type SpectrumFile = {
   id: string;
   filename: string;
   type: string;
   selected: boolean;
 };
 
-const baseFromVite =
-  typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_BASE_URL : undefined;
-const tokenFromVite =
-  typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_FAKE_TOKEN : undefined;
-const BASE_URL =
-  baseFromVite ||
-  (typeof process !== 'undefined' ? process.env.VITE_API_BASE_URL || process.env.API_BASE_URL : undefined) ||
-  'http://localhost:8000';
-const FAKE_TOKEN =
-  tokenFromVite ||
-  (typeof process !== 'undefined' ? process.env.VITE_API_FAKE_TOKEN || process.env.API_FAKE_TOKEN : undefined) ||
-  'demo-token';
+const BASE_URL = '/api/spectra';
+const FAKE_TOKEN = 'demo-token'; // Fallback if no token in storage? Ideally remove.
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
-  // Add bearer token if not provided
-  if (!headers.Authorization) {
-    headers.Authorization = `Bearer ${FAKE_TOKEN}`;
+
+  // Add bearer token if provided in localStorage (managing token in client isn't explicit here yet)
+  // Current implementation relies on FAKE_TOKEN. 
+  // Let's rely on localStorage 'spectra_token' managed by AuthContext or here.
+  const token = localStorage.getItem('spectra_token');
+  if (token && !headers.Authorization) {
+    headers.Authorization = `Bearer ${token}`;
   }
+
+  // Fix: Headers must be created correctly if Body is FormData (browser sets boundary)
+  if (options.body instanceof FormData && headers['Content-Type'] === 'application/json') {
+    delete headers['Content-Type'];
+  }
+
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`HTTP ${res.status}: ${text}`);
+    let msg = text;
+    try {
+      const json = JSON.parse(text);
+      if (json.detail) msg = json.detail;
+    } catch (e) { }
+    throw new Error(msg);
   }
   return res.json() as Promise<T>;
 }
 
 export const api = {
   // Auth
-  async login(email: string, password: string): Promise<AuthResponse> {
-    return request<AuthResponse>('/auth/login', {
+  setToken(token: string | null) {
+    if (token) localStorage.setItem('spectra_token', token);
+    else localStorage.removeItem('spectra_token');
+  },
+
+  getToken() {
+    return localStorage.getItem('spectra_token');
+  },
+
+  logout() {
+    this.setToken(null);
+  },
+
+  async login(username: string, password: string): Promise<AuthResponse> {
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
+
+    // The backend uses OAuth2PasswordRequestForm which expects form-data, not JSON
+    const res = await request<AuthResponse>('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData,
+    });
+
+    this.setToken(res.accessToken);
+    return res;
+  },
+
+  async register(username: string, password: string): Promise<void> {
+    await request<void>('/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ username, password })
     });
   },
-  async guest(): Promise<AuthResponse> {
-    return request<AuthResponse>('/auth/guest', { method: 'POST' });
+
+  async guestLogin(): Promise<AuthResponse> {
+    const res = await request<AuthResponse>('/auth/guest', { method: 'POST' });
+    this.setToken(res.accessToken);
+    return res;
   },
 
   // Imports
@@ -72,6 +127,9 @@ export const api = {
   // Samples
   async listSamples(): Promise<Sample[]> {
     return request<Sample[]>('/samples');
+  },
+  async deleteSample(id: string): Promise<void> {
+    return request<void>(`/samples/${id}`, { method: 'DELETE' });
   },
 
   // Spectra

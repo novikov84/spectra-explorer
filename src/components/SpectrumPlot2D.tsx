@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Spectrum2D } from '@/lib/mockApi';
+import { Spectrum2D } from '@/api/client';
 
 interface SpectrumPlot2DProps {
   spectrum: Spectrum2D;

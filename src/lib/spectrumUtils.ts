@@ -1,4 +1,5 @@
-import { Spectrum1D, Spectrum2D, ParsedParams } from './mockApi';
+import { Spectrum1D, Spectrum2D } from '@/api/client';
+import { ParsedParams } from '@/api/client'; // schema has ParsedParams? Checking schema.ts... yes.
 
 /**
  * Generates a concise label for a spectrum based on its metadata.

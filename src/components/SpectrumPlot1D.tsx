@@ -1,4 +1,4 @@
-import { Spectrum1D } from '@/lib/mockApi';
+import { Spectrum1D } from '@/api/client';
 import { getSpectrumLabel } from '@/lib/spectrumUtils';
 import {
   LineChart,

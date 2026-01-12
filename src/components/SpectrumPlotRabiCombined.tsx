@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { Spectrum1D } from '@/lib/mockApi';
+import { Spectrum1D } from '@/api/client';
 // Shared helper from tests/unit/reportState.cjs
 function computeMasterState(children: boolean[]) {
   const allOn = children.length > 0 && children.every(Boolean);
@@ -473,13 +473,13 @@ export default function SpectrumPlotRabiCombined({ spectra }: SpectrumPlotRabiCo
             margin={{ top: 10, right: 20, left: 10, bottom: 30 }}
             onMouseDown={state => {
               if (state && state.activeLabel !== undefined) {
-                setRefAreaLeft(state.activeLabel as number);
-                setRefAreaRight(state.activeLabel as number);
+                setRefAreaLeft(state.activeLabel as unknown as number);
+                setRefAreaRight(state.activeLabel as unknown as number);
               }
             }}
             onMouseMove={state => {
               if (refAreaLeft !== null && state && state.activeLabel !== undefined) {
-                setRefAreaRight(state.activeLabel as number);
+                setRefAreaRight(state.activeLabel as unknown as number);
               }
             }}
             onMouseUp={commitSelectionToMask}

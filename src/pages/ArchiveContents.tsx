@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { mockApi, SpectrumFile, SpectrumType } from '@/lib/mockApi';
-import { api } from '@/api/client';
-import { isBackendAvailable } from '@/api/backendStatus';
+import { api, SpectrumFile, SpectrumType } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -37,18 +35,7 @@ export default function ArchiveContents() {
   const loadFiles = async () => {
     setIsLoading(true);
     try {
-      let data: SpectrumFile[] | undefined;
-      const backendUp = await isBackendAvailable();
-      if (backendUp) {
-        try {
-          data = await api.listArchiveFiles(sampleId!);
-        } catch (err) {
-          data = undefined;
-        }
-      }
-      if (!data) {
-        data = await mockApi.getArchiveFiles(sampleId!);
-      }
+      const data = await api.listArchiveFiles(sampleId!);
       setFiles(data);
     } catch (error) {
       toast.error('Failed to load archive contents');
@@ -83,16 +70,7 @@ export default function ArchiveContents() {
     setIsProcessing(true);
     try {
       const ids = selectedFiles.map(f => f.id);
-      const backendUp = await isBackendAvailable();
-      if (backendUp) {
-        try {
-          await api.processFiles(sampleId!, ids);
-        } catch {
-          await mockApi.processFiles(sampleId!, ids);
-        }
-      } else {
-        await mockApi.processFiles(sampleId!, ids);
-      }
+      await api.processFiles(sampleId!, ids);
       toast.success('Processing complete');
       navigate(`/viewer/${sampleId}`);
     } catch (error) {
@@ -160,11 +138,10 @@ export default function ArchiveContents() {
                 {files.map((file, index) => (
                   <div
                     key={file.id}
-                    className={`flex items-center justify-between p-4 rounded-lg transition-all animate-fade-in cursor-pointer ${
-                      file.selected
+                    className={`flex items-center justify-between p-4 rounded-lg transition-all animate-fade-in cursor-pointer ${file.selected
                         ? 'bg-primary/5 border border-primary/20'
                         : 'bg-secondary/30 border border-transparent hover:bg-secondary/50'
-                    }`}
+                      }`}
                     style={{ animationDelay: `${index * 30}ms` }}
                     onClick={() => handleToggleFile(file.id)}
                   >
