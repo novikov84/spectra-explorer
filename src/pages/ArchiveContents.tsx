@@ -124,6 +124,26 @@ export default function ArchiveContents() {
             </div>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 flex justify-end">
+              <Button
+                onClick={handleProcess}
+                disabled={isProcessing || selectedCount === 0}
+                size="lg"
+                variant={isProcessing ? 'glow' : 'default'}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Cog />
+                    Process {selectedCount} File{selectedCount !== 1 ? 's' : ''}
+                  </>
+                )}
+              </Button>
+            </div>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -139,8 +159,8 @@ export default function ArchiveContents() {
                   <div
                     key={file.id}
                     className={`flex items-center justify-between p-4 rounded-lg transition-all animate-fade-in cursor-pointer ${file.selected
-                        ? 'bg-primary/5 border border-primary/20'
-                        : 'bg-secondary/30 border border-transparent hover:bg-secondary/50'
+                      ? 'bg-primary/5 border border-primary/20'
+                      : 'bg-secondary/30 border border-transparent hover:bg-secondary/50'
                       }`}
                     style={{ animationDelay: `${index * 30}ms` }}
                     onClick={() => handleToggleFile(file.id)}
