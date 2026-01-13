@@ -17,8 +17,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { ArrowLeft, Loader2, LineChart, Trash2, BarChart3, Plus, ChevronUp, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Loader2, LineChart, Trash2, BarChart3, Plus, ChevronUp, ChevronDown, Camera } from 'lucide-react';
 import { toast } from 'sonner';
+import html2canvas from 'html2canvas';
 import SpectrumPlot1D from '@/components/SpectrumPlot1D';
 import SpectrumPlot2D from '@/components/SpectrumPlot2D';
 import SpectrumPlot2DSlices from '@/components/SpectrumPlot2DSlices';
@@ -44,7 +45,7 @@ import {
 import { SortablePlotPanel } from '@/components/SortablePlotPanel';
 
 
-const spectrumGroups: SpectrumType[] = ['CW', 'EDFS', 'T1', 'T2', 'Rabi', 'HYSCORE', '2D', 'Unknown'];
+const spectrumGroups: SpectrumType[] = ['CW', 'EDFS', 'T1', 'T2', 'Rabi', 'HYSCORE', '2D', '2D T1', '2D T2', 'Unknown'];
 
 interface ViewOptions {
   normalize: boolean;
@@ -107,6 +108,8 @@ export default function Viewer() {
       Rabi: [],
       HYSCORE: [],
       '2D': [],
+      '2D T1': [],
+      '2D T2': [],
       Unknown: [],
     };
 
@@ -237,6 +240,43 @@ export default function Viewer() {
       });
       return next;
     });
+  };
+
+  const handleCopyImage = async (id: string) => {
+    const element = document.getElementById(`plot-card-${id}`);
+    if (!element) return;
+
+    try {
+      const canvas = await html2canvas(element, {
+        backgroundColor: '#ffffff', // Force white background (or use null for transparent if supported)
+        logging: false,
+        scale: 2 // High res
+      });
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+          toast.success('Plot copied to clipboard');
+        } catch (err) {
+          console.warn('Clipboard write failed, falling back to download', err);
+          // Fallback: Download the image
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `spectrum-plot-${id}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          toast.info('Clipboard access blocked. Image downloaded instead.');
+        }
+      });
+    } catch (err) {
+      toast.error('Failed to capture image');
+    }
   };
 
   return (
@@ -415,7 +455,7 @@ export default function Viewer() {
 
                       // Determine component based on type
                       const isRabi = type === 'Rabi';
-                      const is2D = type === '2D' || is2DSpectrum(groupSpectra[0]);
+                      const is2D = type.startsWith('2D') || type === 'HYSCORE' || is2DSpectrum(groupSpectra[0]);
 
                       return (
                         <SortablePlotPanel key={id} id={id}>
@@ -504,6 +544,16 @@ export default function Viewer() {
                                   )}
 
                                   <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    title="Copy Image"
+                                    onClick={() => handleCopyImage(id)}
+                                  >
+                                    <Camera className="w-4 h-4" />
+                                  </Button>
+
+                                  <Button
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7 text-muted-foreground hover:text-destructive"
@@ -515,14 +565,14 @@ export default function Viewer() {
                               </div>
                             </CardHeader>
                             {!isCollapsed && (
-                              <CardContent>
+                              <CardContent id={`plot-card-${id}`}>
                                 {isRabi ? (
                                   <SpectrumPlotRabiCombined spectra={groupSpectra as Spectrum1D[]} />
                                 ) : is2D ? (
                                   twoDMode === 'heatmap' ? (
-                                    groupSpectra.map(s => <SpectrumPlot2D key={s.id} spectrum={s as Spectrum2D} />)
+                                    <SpectrumPlot2D key={s.id} spectrum={s as Spectrum2D} />
                                   ) : (
-                                    groupSpectra.map(s => <SpectrumPlot2DSlices key={s.id} spectrum={s as Spectrum2D} />)
+                                    <SpectrumPlot2DSlices key={s.id} spectrum={s as Spectrum2D} />
                                   )
                                 ) : (
                                   <SpectrumPlot1D

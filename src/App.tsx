@@ -14,48 +14,52 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <AuthProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter basename="/apps/spectra">
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route
-              path="/samples"
-              element={
-                <ProtectedRoute>
-                  <Samples />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/archive/:sampleId"
-              element={
-                <ProtectedRoute>
-                  <ArchiveContents />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/viewer/:sampleId"
-              element={
-                <ProtectedRoute>
-                  <Viewer />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-        <div className="fixed bottom-4 right-4 z-30">
-          <ThemeToggle />
-        </div>
-      </AuthProvider>
-    </TooltipProvider>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <AuthProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter basename="/apps/spectra">
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route
+                path="/samples"
+                element={
+                  <ProtectedRoute>
+                    <Samples />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/archive/:sampleId"
+                element={
+                  <ProtectedRoute>
+                    <ArchiveContents />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/viewer/:sampleId"
+                element={
+                  <ProtectedRoute>
+                    <Viewer />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+          <div className="fixed bottom-4 right-4 z-30">
+            <ThemeToggle />
+          </div>
+        </AuthProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;

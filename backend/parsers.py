@@ -106,19 +106,34 @@ def parse_params_from_name(raw_name: str) -> dict:
 
 def infer_spectrum_type(name: str, meta: Dict[str, str], is_2d: bool) -> str:
     lower_name = name.lower()
-    if 'edfs' in lower_name: return 'EDFS'
-    if 'rabi' in lower_name: return 'Rabi'
-    if 't1' in lower_name: return 'T1'
-    if 't2' in lower_name: return 'T2'
-    if 'hyscore' in lower_name: return 'HYSCORE'
-    if '2d' in lower_name: return '2D'
-    if 'cw' in lower_name: return 'CW'
     
-    family = get_str(meta, 'EXPT', '')
-    if 'CW' in family: return '2D' if is_2d else 'CW'
-    if 'PULSED' in family: return '2D' if is_2d else 'T1'
+    base_type = 'Unknown'
+    if 'edfs' in lower_name: base_type = 'EDFS'
+    elif 'rabi' in lower_name: base_type = 'Rabi'
+    elif 't1' in lower_name: base_type = 'T1'
+    elif 't2' in lower_name: base_type = 'T2'
+    elif 'hyscore' in lower_name: base_type = 'HYSCORE'
+    elif '2d' in lower_name: base_type = '2D'
+    elif 'cw' in lower_name: base_type = 'CW'
+    else:
+        family = get_str(meta, 'EXPT', '')
+        if 'CW' in family: base_type = 'CW'
+        elif 'PULSED' in family: base_type = 'T1' # Default pulsed is T1-ish
     
-    return '2D' if is_2d else 'Unknown'
+    # Refine based on is_2d
+    if is_2d:
+        if base_type in ['T1', 'T2']:
+            return f"2D {base_type}"
+        if base_type == 'Unknown':
+            return '2D'
+        # HYSCORE is intrinsically 2D or treated as such? Usually 2D.
+        # Rabi 2D? Rare but possible.
+        if base_type not in ['2D', 'HYSCORE']: # Don't double label "2D 2D"
+             # If user explicitly wants separate types for everything, we can do it.
+             # User asked for "2D T1, 2D T2".
+             return f"2D {base_type}"
+             
+    return base_type
 
 def axis_vector(meta: Dict[str, str], axis: str, points: int) -> List[float]:
     min_val = get_float(meta, f'{axis}MIN', None)

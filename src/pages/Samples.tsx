@@ -87,9 +87,12 @@ export default function Samples() {
 
   const handleDeleteSample = async (sampleId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this sample?')) return;
+
     try {
-      // api.deleteSample(sampleId); // Need to add to client
-      toast.error('Delete not implemented in client yet');
+      await api.deleteSample(sampleId);
+      setSamples((prev) => prev.filter((s) => s.id !== sampleId));
+      toast.success('Sample deleted');
     } catch (error) {
       toast.error('Failed to delete sample');
     }

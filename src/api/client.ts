@@ -66,6 +66,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } catch (e) { }
     throw new Error(msg);
   }
+  if (res.status === 204) {
+    return null as unknown as Promise<T>;
+  }
   return res.json() as Promise<T>;
 }
 

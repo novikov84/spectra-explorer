@@ -28,6 +28,14 @@ export default function SpectrumPlot1D({
   normalize = true,
   offset = true,
 }: SpectrumPlot1DProps) {
+  // --- Validation ---
+  const validSpectra = useMemo(() => {
+    if (!spectra) return [];
+    return spectra.filter(s => s && Array.isArray(s.realData) && Array.isArray(s.xData));
+  }, [spectra]);
+
+  // Use validSpectra instead of spectra for calculations
+  const spectraToUse = validSpectra;
   // --- Zoom State ---
   const [left, setLeft] = useState<number | string | null>(null);
   const [right, setRight] = useState<number | string | null>(null);
@@ -69,13 +77,13 @@ export default function SpectrumPlot1D({
 
   // --- Dynamic Time Scaling ---
   const { timeScale, timeUnit, xLabel } = useMemo(() => {
-    if (!spectra || spectra.length === 0) {
+    if (!spectraToUse || spectraToUse.length === 0) {
       return { timeScale: 1, timeUnit: '', xLabel: '' };
     }
 
-    const firstLabel = spectra[0].xLabel || '';
+    const firstLabel = spectraToUse[0].xLabel || '';
     const isTime = firstLabel.toLowerCase().includes('time') ||
-      ['T1', 'T2', 'Rabi', 'EDFS'].includes(spectra[0].type);
+      ['T1', 'T2', 'Rabi', 'EDFS'].includes(spectraToUse[0].type);
 
     if (!isTime) {
       return { timeScale: 1, timeUnit: '', xLabel: firstLabel };
@@ -83,7 +91,7 @@ export default function SpectrumPlot1D({
 
     // Find global max X to determine scale
     let maxX = 0;
-    spectra.forEach(s => {
+    spectraToUse.forEach(s => {
       const localMax = Math.max(...s.xData);
       if (localMax > maxX) maxX = localMax;
     });
@@ -109,15 +117,15 @@ export default function SpectrumPlot1D({
     newLabel = `${newLabel} (${unit})`;
 
     return { timeScale: scale, timeUnit: unit, xLabel: newLabel };
-  }, [spectra]);
+  }, [spectraToUse]);
 
   // --- Dynamic Y Scaling (User Request: max 3 digits) ---
   const { yScale, yMultiplierLabel } = useMemo(() => {
-    if (!spectra || spectra.length === 0) return { yScale: 1, yMultiplierLabel: '' };
+    if (!spectraToUse || spectraToUse.length === 0) return { yScale: 1, yMultiplierLabel: '' };
 
     // Find global max Y (absolute value) to determine scale
     let maxY = 0;
-    spectra.forEach(s => {
+    spectraToUse.forEach(s => {
       const maxR = Math.max(...s.realData.map(Math.abs));
       const maxI = showImag ? Math.max(...s.imagData.map(Math.abs)) : 0;
       maxY = Math.max(maxY, maxR, maxI);
@@ -148,12 +156,12 @@ export default function SpectrumPlot1D({
     }
 
     return { yScale: scale, yMultiplierLabel: label };
-  }, [spectra, normalize, showImag]);
+  }, [spectraToUse, normalize, showImag]);
 
   const processedData = useMemo(() => {
-    if (!spectra || spectra.length === 0) return [];
+    if (!spectraToUse || spectraToUse.length === 0) return [];
 
-    return spectra.map((spectrum) => {
+    return spectraToUse.map((spectrum) => {
       let yReal = [...spectrum.realData];
       let yImag = [...spectrum.imagData];
 
@@ -193,10 +201,10 @@ export default function SpectrumPlot1D({
         processedImag: yImag
       };
     });
-  }, [spectra, baselineCorrect, normalize, timeScale, yScale]);
+  }, [spectraToUse, baselineCorrect, normalize, timeScale, yScale]);
 
   // Update Label
-  const effectiveYLabel = (spectra.length > 0 ? spectra[0].yLabel : '') + yMultiplierLabel;
+  const effectiveYLabel = (spectraToUse.length > 0 ? spectraToUse[0].yLabel : '') + yMultiplierLabel;
 
   // Merge datasets for plotting
   const mergedData = useMemo(() => {
@@ -225,7 +233,7 @@ export default function SpectrumPlot1D({
     return Array.from(dataMap.values());
   }, [processedData, offset, showImag, normalize]);
 
-  if (spectra.length === 0) {
+  if (spectraToUse.length === 0) {
     return (
       <Card className="h-[400px] flex items-center justify-center text-muted-foreground">
         No Data
@@ -233,7 +241,7 @@ export default function SpectrumPlot1D({
     );
   }
 
-  const yLabel = spectra[0].yLabel;
+  const yLabel = spectraToUse[0].yLabel;
 
   // Zoom Handlers
   const zoom = () => {
@@ -320,7 +328,7 @@ export default function SpectrumPlot1D({
       wrapperStyle: { cursor: 'pointer' }
     };
 
-    if (!spectra || spectra.length === 0) return { ...commonProps };
+    if (!spectraToUse || spectraToUse.length === 0) return { ...commonProps };
 
     // Responsive: Move to bottom if narrow
     if (containerWidth < 600) {
@@ -336,7 +344,7 @@ export default function SpectrumPlot1D({
       };
     }
 
-    const type = spectra[0].type;
+    const type = spectraToUse[0].type;
 
     // Common styles for overlaid legend
     const overlayStyle = {
@@ -385,7 +393,7 @@ export default function SpectrumPlot1D({
       ...commonProps,
       wrapperStyle: { paddingTop: '20px', cursor: 'pointer' }
     };
-  }, [spectra, containerWidth]);
+  }, [spectraToUse, containerWidth]);
 
   return (
     <div

@@ -77,7 +77,7 @@ async def get_current_user(user: Optional[User] = Depends(get_current_user_optio
 
 # --- Models (Pydantic for API) ---
 
-SpectrumType = Literal["CW", "EDFS", "T1", "T2", "Rabi", "HYSCORE", "2D", "Unknown"]
+SpectrumType = Literal["CW", "EDFS", "T1", "T2", "Rabi", "HYSCORE", "2D", "2D T1", "2D T2", "Unknown"]
 
 class ParsedParams(BaseModel):
     sampleName: str
@@ -448,5 +448,33 @@ def list_spectra(
         selected_filenames = {f.filename for f in files if f.selected}
         
         return {"spectra": [s for s in spectra_map.values() if s.filename in selected_filenames]}
+
+@app.delete("/samples/{sample_id}", status_code=204)
+def delete_sample(
+    sample_id: str,
+    user: Optional[User] = Depends(get_current_user_optional),
+    session: Session = Depends(get_session)
+):
+    if user:
+        s_db = session.get(Sample, sample_id)
+        if not s_db or s_db.user_id != user.id:
+            raise HTTPException(404, "Sample not found")
+            
+        # Delete file from disk
+        zip_path = os.path.join(UPLOAD_DIR, f"{sample_id}.zip")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+            
+        session.delete(s_db)
+        session.commit()
+    else:
+        # Guest delete
+        store = get_guest_store()
+        if sample_id in store['samples']:
+            del store['samples'][sample_id]
+        if sample_id in store['files']:
+            del store['files'][sample_id]
+        if sample_id in store['spectra']:
+            del store['spectra'][sample_id]
 
 # ... (Reports, etc. stubbed)
