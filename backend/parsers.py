@@ -156,9 +156,13 @@ def axis_vector(meta: Dict[str, str], axis: str, points: int) -> List[float]:
 
 def normalize_x_for_time_type(x: List[float], type: str, label: str) -> List[float]:
     # Logic to zero-correct time axes if needed
-    time_types = ['T1', 'T2', 'Rabi', 'EDFS']
+    time_types = ['T1', 'T2', 'Rabi']
     is_time = any(u in label.lower() for u in ['time', 'tau', ' s', 'ms', 'us', 'ns'])
     
+    # EDFS is Field Sweep, never normalize even if label says 'us' (common Bruker metadata issue)
+    if type == 'EDFS':
+        return x
+
     if type in time_types or is_time:
         if not x: return x
         min_val = min(x)
@@ -267,7 +271,45 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
             spectrum_type = infer_spectrum_type(base_name, meta, ypts > 1)
             parsed_params = parse_params_from_name(base_name.split('/')[-1])
             
+            # Debug Logging
+            logger.info(f"Parsed {base_name}: Type={spectrum_type}, XNAM={get_str(meta, 'XNAM')}, XUNI={get_str(meta, 'XUNI')}, XMIN={get_str(meta, 'XMIN')}, XWID={get_str(meta, 'XWID')}")
+
+            # 1. Zero-correction for Time Domain (T1/T2/Rabi)
             x_vector = normalize_x_for_time_type(x_vector, spectrum_type, x_axis_label)
+
+            # 2. Unit Standardization (Convert to Gauss if magnetic field)
+            # Handle kG, T, mT -> G
+            # Handle mislabeled EDFS (e.g. 0-14 labeled 'us' -> predict kG -> 14000 G)
+            
+            x_lower = x_axis_label.lower()
+            is_mag_field = 'gauss' in x_lower or 'field' in x_lower or 'G' in x_axis_label or spectrum_type == 'EDFS'
+            
+            if is_mag_field and x_vector:
+                max_val = max(x_vector)
+                
+                # Case A: Explicit Units
+                if '(T)' in x_axis_label or '(Tesla)' in x_axis_label:
+                    x_vector = [v * 10000 for v in x_vector]
+                    x_axis_label = "Magnetic Field (G)"
+                elif '(mT)' in x_axis_label:
+                    x_vector = [v * 10 for v in x_vector]
+                    x_axis_label = "Magnetic Field (G)"
+                elif '(kG)' in x_axis_label:
+                    x_vector = [v * 1000 for v in x_vector]
+                    x_axis_label = "Magnetic Field (G)"
+                elif '(kg)' in x_lower: # typo handle
+                     x_vector = [v * 1000 for v in x_vector]
+                     x_axis_label = "Magnetic Field (G)"
+
+                # Case B: EDFS Heuristic for "0 to 14" issue
+                # If EDFS, and range is small (e.g. 0-20), and it's NOT explicitly T/kG (already handled),
+                # AND it might be mislabeled as 'us' or just 'G' but values are kG.
+                elif spectrum_type == 'EDFS':
+                    if max_val <= 20: # 14 fall in here. 14000 does not.
+                        # Assume kG implies 14000 G
+                        x_vector = [v * 1000 for v in x_vector]
+                        x_axis_label = "Magnetic Field (G)"
+                        logger.info(f"Applied EDFS Correction: Scaled x1000 (assuming kG) for {base_name}")
 
             filename_only = base_name.split('/')[-1]
 
@@ -294,6 +336,7 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                     parsed_params=parsed_params
                 )
                 spectra.append(spec)
+
                 
             else:
                 # 1D Spectrum

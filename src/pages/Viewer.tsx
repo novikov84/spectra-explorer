@@ -570,9 +570,9 @@ export default function Viewer() {
                                   <SpectrumPlotRabiCombined spectra={groupSpectra as Spectrum1D[]} />
                                 ) : is2D ? (
                                   twoDMode === 'heatmap' ? (
-                                    <SpectrumPlot2D key={s.id} spectrum={s as Spectrum2D} />
+                                    groupSpectra.map(s => <SpectrumPlot2D key={s.id} spectrum={s as Spectrum2D} />)
                                   ) : (
-                                    <SpectrumPlot2DSlices key={s.id} spectrum={s as Spectrum2D} />
+                                    groupSpectra.map(s => <SpectrumPlot2DSlices key={s.id} spectrum={s as Spectrum2D} />)
                                   )
                                 ) : (
                                   <SpectrumPlot1D

@@ -83,7 +83,7 @@ export default function SpectrumPlot1D({
 
     const firstLabel = spectraToUse[0].xLabel || '';
     const isTime = firstLabel.toLowerCase().includes('time') ||
-      ['T1', 'T2', 'Rabi', 'EDFS'].includes(spectraToUse[0].type);
+      ['T1', 'T2', 'Rabi'].includes(spectraToUse[0].type);
 
     if (!isTime) {
       return { timeScale: 1, timeUnit: '', xLabel: firstLabel };
