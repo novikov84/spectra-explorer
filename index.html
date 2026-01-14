@@ -18,15 +18,83 @@
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag() { dataLayer.push(arguments); }
-    gtag('js', new Date());
 
-    gtag('config', 'G-RHMEVF1B7C');
+    // Check saved consent
+    const c = document.cookie.split("; ").find(row => row.startsWith("cookie_consent="));
+    const granted = c ? c.split("=")[1] === "granted" : false;
+
+    if (granted) {
+      gtag("consent", "default", {
+        ad_storage: "granted",
+        analytics_storage: "granted",
+        ad_user_data: "granted",
+        ad_personalization: "granted"
+      });
+    } else {
+      gtag("consent", "default", {
+        ad_storage: "denied",
+        analytics_storage: "denied",
+        ad_user_data: "denied",
+        ad_personalization: "denied"
+      });
+    }
+
+    gtag("js", new Date());
+    gtag("config", "G-RHMEVF1B7C");
   </script>
 </head>
 
 <body>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
+  <!-- Cookie Consent Banner -->
+  <div id="cookie-banner"
+    style="display:none; position:fixed; bottom:0; left:0; right:0; background:#0f172a; color:white; padding:1rem; justify-content:center; align-items:center; gap:1rem; z-index:9999; font-family:sans-serif; border-top: 1px solid #334155;">
+    <div
+      style="max-width: 900px; display: flex; gap: 1rem; align-items: center; justify-content: space-between; width: 100%;">
+      <span style="font-size: 0.9rem;">We use cookies to analyze traffic and improve your experience.</span>
+      <div style="display:flex; gap:0.5rem;">
+        <button id="decline-cookies"
+          style="background:transparent; color:#cbd5e1; border:1px solid #334155; padding:0.5rem 1rem; border-radius:0.375rem; cursor:pointer; font-weight: 500; transition: all 0.2s;">Decline</button>
+        <button id="accept-cookies"
+          style="background:#2563eb; color:white; border:none; padding:0.5rem 1.5rem; border-radius:0.375rem; cursor:pointer; font-weight: 500; transition: background 0.2s;">Accept</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const banner = document.getElementById("cookie-banner");
+      const btnAccept = document.getElementById("accept-cookies");
+      const btnDecline = document.getElementById("decline-cookies");
+      const hasConsent = document.cookie.split("; ").find(row => row.startsWith("cookie_consent="));
+
+      if (!hasConsent) {
+        banner.style.display = "flex";
+      }
+
+      btnAccept.addEventListener("click", function () {
+        gtag("consent", "update", {
+          ad_storage: "granted",
+          analytics_storage: "granted",
+          ad_user_data: "granted",
+          ad_personalization: "granted"
+        });
+        document.cookie = "cookie_consent=granted; path=/; max-age=31536000";
+        banner.style.display = "none";
+      });
+
+      btnDecline.addEventListener("click", function () {
+        gtag("consent", "update", {
+          ad_storage: "denied",
+          analytics_storage: "denied",
+          ad_user_data: "denied",
+          ad_personalization: "denied"
+        });
+        document.cookie = "cookie_consent=denied; path=/; max-age=31536000";
+        banner.style.display = "none";
+      });
+    })();
+  </script>
 </body>
 
 </html>
