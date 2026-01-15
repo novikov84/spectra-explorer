@@ -439,7 +439,14 @@ def list_spectra(
             content = f.read()
             _, spectra, _, _ = parse_and_process(content, sample_id)
             # Filter by selected filenames
-            return {"spectra": [s for s in spectra.values() if s.filename in selected_filenames]}
+            filtered = [s for s in spectra.values() if s.filename in selected_filenames]
+            for s in filtered:
+                print(f"Server returning: {s.filename} (Type: {s.type})")
+                print(f"  Keys: {s.dict().keys()}")
+                if hasattr(s, 'zData'):
+                     print(f"  Has zData: {len(s.zData) if s.zData else 'None/Empty'}")
+            
+            return {"spectra": filtered}
             
     else:
         store = get_guest_store()
