@@ -305,169 +305,142 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                      logger.info(f"Applied EDFS Correction for {base_name}")
 
             
-            for idx, config in enumerate(dataset_configs):
-                # Slice Buffer
-                chunk = dta_bytes[current_offset : current_offset + config['size_bytes']]
-                current_offset += config['size_bytes']
-                
-                # Numpy frombuffer is faster
-                # Correct endian if needed
-                dt = np.dtype(config['dtype'])
-                original_endian = config['endian']
-                dt = dt.newbyteorder(original_endian)
-                
-                data_array = np.frombuffer(chunk, dtype=dt)
-                
-                # Endianness Heuristic Check
-                # ... (Existing Endian check was good, keep it or merge with this?) ...
-                # Actually, let's incorporate the Smoothness Check which is more robust for Structure.
-                
-                def get_smoothness(arr):
-                    if len(arr) < 2: return 0
-                    diffs = np.abs(np.diff(arr))
-                    rng = np.ptp(arr)
-                    if rng == 0: return 0
-                    return np.mean(diffs) / rng
-
-                # 1. First fix Endianness (Magnitude check)
-                if len(data_array) > 0:
-                     max_val = np.max(np.abs(data_array))
-                     if not np.isfinite(max_val) or max_val > 1e20:
-                         logger.warning(f"Detected suspicious values (max={max_val:.2e}) with endian {original_endian}. Swapping.")
-                         other_endian = '<' if original_endian == '>' else '>'
-                         dt_swapped = np.dtype(config['dtype']).newbyteorder(other_endian)
-                         data_array = np.frombuffer(chunk, dtype=dt_swapped)
-
-                # 2. Determine Structure: Interleaved vs Block
-                # We expect Real/Imag components.
-                if config['is_complex'] and len(data_array) >= (xpts * 2):
-                    # Candidate 1: Interleaved (Standard Bruker)
-                    # Real = 0, 2, 4... | Imag = 1, 3, 5...
-                    real_int = data_array[0::2]
-                    imag_int = data_array[1::2]
+            # --- Verified Quad-Interleave Logic ---
+            # Pattern: [R1, I1, R2, I2] (Stride 4)
+            # R1 (Index 0) = Real Signal (Matches CSV Col 2)
+            # R2 (Index 2) = Imag Signal (Matches CSV Col 4)
+            total_points_per_input = xpts * ypts
+            expected_total_doubles = total_points_per_input * 4
+            
+            # Check size match for Quad-Interleave
+            is_quad_interleaved = (len(dta_bytes) // 8 == expected_total_doubles)
+            
+            parsed_quad = False
+            
+            if is_quad_interleaved and is_complex:
+                logger.info(f"Detected Quad-Interleaved Data (4 vals/point). Parsing as single merged spectrum.")
+                try:
+                    # We assume Big Endian Double as verified by CSV match
+                    # Parse ALL values as one flat array
+                    all_vals = struct.unpack(f">{total_points_per_input*4}d", dta_bytes)
+                    all_vals = np.array(all_vals)
                     
-                    # Candidate 2: Block (Sequential)
-                    # Real = 0..N-1 | Imag = N..2N-1
-                    # Note: We need to be careful about total points. 
-                    # If data_array includes multiple channels (which we handled via chunking?), 
-                    # then config['size_bytes'] ensures we only have ONE dataset here.
-                    mid = len(data_array) // 2
-                    real_blk = data_array[:mid]
-                    imag_blk = data_array[mid:]
+                    real_data = all_vals[0::4] # Index 0
+                    imag_data = all_vals[2::4] # Index 2
                     
-                    # Compute Smoothness
-                    # Use a subset for speed if array is huge
-                    subset = min(len(real_int), 1000)
-                    score_int = get_smoothness(real_int[:subset])
-                    score_blk = get_smoothness(real_blk[:subset])
+                    filename_only = base_name.split('/')[-1]
+                    y_axis_label = f"{get_str(meta, 'YNAM')} ({get_str(meta, 'YUNI')})"
                     
-                    logger.info(f"Structure Heuristic: Interleaved={score_int:.4f}, Block={score_blk:.4f}")
-                    
-                    if score_blk < score_int: 
-                        # Block is smoother.
-                        logger.info("Selecting BLOCK structure based on smoothness.")
-                        real_data = real_blk
-                        imag_data = imag_blk
-                    else:
-                        logger.info("Selecting INTERLEAVED structure (default).")
-                        real_data = real_int
-                        imag_data = imag_int
-                else:
-                    # Non-Complex or weird size
-                    real_data = data_array
-                    imag_data = np.zeros_like(real_data)
-                
-                # Check formatting of size (handling potential remaining mismatch)
-                # Ensure we match xpts * ypts for the output spectrum
-                if len(real_data) != total_points_per_input:
-                     if len(real_data) > total_points_per_input:
-                         real_data = real_data[:total_points_per_input]
-                         imag_data = imag_data[:total_points_per_input]
-                
-                # --- Smart Cleaning ---
-                # User Feedback: "Oscillating limits", "Why 2 spectra?".
-                # Often Bruker exports contain noise channels or untuned Imaginary channels.
-                # If we detect Imaginary is NOISY and Real is CLEAN, we zero Imaginary.
-                # If we detect Channel 2 is NOISY and Channel 1 is CLEAN, we drop Channel 2.
-                
-                clean_threshold = 0.05
-                noise_threshold = 0.15
-                
-                # Check Smoothness using a subset
-                check_subset = 1000
-                s_real = get_smoothness(real_data[:check_subset]) if len(real_data) > 0 else 1.0
-                s_imag = get_smoothness(imag_data[:check_subset]) if len(imag_data) > 0 else 1.0
-                
-                # Heuristic 1: Cleaning Imaginary Noise
-                # If Real is smooth (Signal) and Imag is roughness (Noise), zero Imag.
-                if s_real < clean_threshold and s_imag > noise_threshold:
-                    logger.info(f"Smart Cleaning: Zeroing noisy Imaginary part (Real={s_real:.3f}, Imag={s_imag:.3f})")
-                    imag_data = np.zeros_like(real_data)
-                    
-                # Heuristic 2: Dropping Noisy Channels
-                # We can't drop efficiently inside the loop unless we track them.
-                # So we simply mark it good/bad and filter later? 
-                # Or just append and filter at end of function.
-                
-                is_noisy_channel = (s_real > noise_threshold and s_imag > noise_threshold)
-                # If Real is somewhat clean (> clean but < noise), we keep it. 
-                # Only drop if BOTH are trash.
-                
-                # Suffix for filename
-                suffix = f"_ch{idx+1}" if num_datasets > 1 else ""
-                filename_only = base_name.split('/')[-1] + suffix
-
-                y_axis_label = f"{get_str(meta, 'YNAM')} ({get_str(meta, 'YUNI')})"
-
-                if ypts > 1:
-                    # 2D Spectrum
-                    y_vector = axis_vector(meta, 'Y', ypts)
-                    z_data = []
-                    for k in range(ypts):
-                        start_pt = k * xpts
-                        end_pt = start_pt + xpts
-                        z_data.append(real_data[start_pt:end_pt].tolist())
-                        
-                    spec = Spectrum2D(
+                    spec = Spectrum1D(
                         filename=filename_only,
                         type=spectrum_type,
                         x_label=x_axis_label_base,
                         y_label=y_axis_label,
                         x_data=x_vector,
-                        y_data=y_vector,
-                        z_data=z_data,
+                        real_data=real_data.tolist(),
+                        imag_data=imag_data.tolist(),
                         parsed_params=parsed_params
                     )
                     spectra.append(spec)
-                else:
-                    # 1D Spectrum
+                    parsed_quad = True
+                    
+                except Exception as e:
+                    logger.error(f"Quad-Interleave parse failed: {e}. Falling back to standard loop.")
+                    parsed_quad = False
+
+            if not parsed_quad:
+                # --- Standard Loop (Legacy) ---
+                for idx, config in enumerate(dataset_configs):
+                    # Slice Buffer
+                    chunk = dta_bytes[current_offset : current_offset + config['size_bytes']]
+                    current_offset += config['size_bytes']
+                    
+                    # Numpy frombuffer implies Native byte order usually, so we must enforce explicit endian
+                    dt = np.dtype(config['dtype'])
+                    original_endian = config['endian']
+                    dt = dt.newbyteorder(original_endian)
+                    
+                    data_array = np.frombuffer(chunk, dtype=dt)
+                    
+                    # 1. Endianness Heuristic (Magnitude)
+                    if len(data_array) > 0:
+                        max_val = np.max(np.abs(data_array))
+                        # If values are insanely huge, swap endian
+                        if not np.isfinite(max_val) or max_val > 1e20:
+                             logger.warning(f"Detected suspicious values (max={max_val:.2e}). Swapping endian.")
+                             other_endian = '<' if original_endian == '>' else '>'
+                             dt_swapped = np.dtype(config['dtype']).newbyteorder(other_endian)
+                             data_array = np.frombuffer(chunk, dtype=dt_swapped)
+
+                    # 2. Structure: Interleaved vs Block (Smoothness Heuristic)
+                    real_data = []
+                    imag_data = []
+                    
+                    if config['is_complex'] and len(data_array) >= (xpts * 2):
+                        # Interleaved (R, I, R, I...)
+                        r_int = data_array[0::2]
+                        i_int = data_array[1::2]
+                        
+                        # Block (R... I...)
+                        mid = len(data_array) // 2
+                        r_blk = data_array[:mid]
+                        i_blk = data_array[mid:]
+                        
+                        # Simple smoothness check
+                        def _smooth(arr):
+                             if len(arr) < 2: return 0
+                             return np.mean(np.abs(np.diff(arr))) / (np.ptp(arr) or 1.0)
+                        
+                        score_int = _smooth(r_int[:1000]) if len(r_int) > 0 else 1
+                        score_blk = _smooth(r_blk[:1000]) if len(r_blk) > 0 else 1
+                        
+                        logger.info(f"Ch{idx}: Smoothness Int={score_int:.4f}, Blk={score_blk:.4f}")
+                        
+                        if score_blk < score_int:
+                            real_data, imag_data = r_blk, i_blk
+                        else:
+                            real_data, imag_data = r_int, i_int
+                    else:
+                        real_data = data_array 
+                        imag_data = np.zeros_like(real_data)
+                    
+                    # Truncate to expected size
+                    if len(real_data) > total_points_per_input:
+                        real_data = real_data[:total_points_per_input]
+                        imag_data = imag_data[:total_points_per_input]
+                        
+                    # 3. Smart Cleaning (Legacy)
+                    # If Real Clean & Imag Noisy -> Zero Imag
+                    # If Real Noisy -> Mark for drop
+                    s_r = _smooth(real_data[:1000]) if len(real_data)>0 else 1
+                    s_i = _smooth(imag_data[:1000]) if len(imag_data)>0 else 1
+                    
+                    if s_r < 0.05 and s_i > 0.15:
+                        imag_data = np.zeros_like(real_data)
+                    
+                    suffix = f"_ch{idx+1}" if len(dataset_configs) > 1 else ""
+                    filename_only = base_name.split('/')[-1] + suffix
+                    y_axis_label = f"{get_str(meta, 'YNAM')} ({get_str(meta, 'YUNI')})"
+
                     spec = Spectrum1D(
                         filename=filename_only,
                         type=spectrum_type,
                         x_label=x_axis_label_base,
-                        y_label='Intensity (a.u.)',
+                        y_label=y_axis_label, # "Intensity (a.u.)"
                         x_data=x_vector,
                         real_data=real_data.tolist(),
                         imag_data=imag_data.tolist(),
                         parsed_params=parsed_params
                     )
-                    
-                    # Store quality metric for filtering
-                    spec._quality_score_real = s_real
+                    spec._quality_score_real = s_r
                     spectra.append(spec)
-            
-            # Post-Processing: Drop noisy secondaries
-            # Only if we have multiple spectra
-            if len(spectra) > 1 and i == num_datasets - 1: # End of datasets loop
-                 # Identify "Best" spectrum
-                 # Filter out spectra where Real smoothness > 0.15 (Noise) IF there is a better one
-                 # But we must be careful not to drop legitimate noisy signals.
-                 # Heuristic: If Spec1 is clean (<0.05) and Spec2 is noisy (>0.2), drop Spec2.
-                 
-                 clean_spectra = [s for s in spectra if getattr(s, '_quality_score_real', 1.0) < noise_threshold]
-                 if clean_spectra and len(clean_spectra) < len(spectra):
-                     logger.info(f"Smart Filtering: Dropping {len(spectra) - len(clean_spectra)} noisy channels.")
-                     spectra = clean_spectra
+                
+                # Filter noisy spectra if we have multiple
+                if len(spectra) > 1:
+                     clean_spectra = [s for s in spectra if getattr(s, '_quality_score_real', 1.0) < 0.15]
+                     if clean_spectra and len(clean_spectra) < len(spectra):
+                         logger.info(f"Smart Filtering: Dropped {len(spectra) - len(clean_spectra)} noisy channels.")
+                         spectra = clean_spectra
 
         except Exception as e:
             logger.error(f"Failed to parse {dsc_path}: {e}")
