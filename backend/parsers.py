@@ -305,19 +305,22 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                      logger.info(f"Applied EDFS Correction for {base_name}")
 
             
-            # --- Verified Quad-Interleave Logic ---
-            # Pattern: [R1, I1, R2, I2] (Stride 4)
+            # Match CSV layout: [R1, I1, R2, I2] (Stride 4)
             # R1 (Index 0) = Real Signal (Matches CSV Col 2)
             # R2 (Index 2) = Imag Signal (Matches CSV Col 4)
             total_points_per_input = xpts * ypts
             expected_total_doubles = total_points_per_input * 4
+            
+            # Helper to check complexity roughly (though we should check IKKF per dataset)
+            # Typically for CW like this, IKKF is CPLX,CPLX
+            is_complex_global = 'CPLX' in get_str(meta, 'IKKF', 'REAL')
             
             # Check size match for Quad-Interleave
             is_quad_interleaved = (len(dta_bytes) // 8 == expected_total_doubles)
             
             parsed_quad = False
             
-            if is_quad_interleaved and is_complex:
+            if is_quad_interleaved and is_complex_global:
                 logger.info(f"Detected Quad-Interleaved Data (4 vals/point). Parsing as single merged spectrum.")
                 try:
                     # We assume Big Endian Double as verified by CSV match
