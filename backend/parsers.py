@@ -125,16 +125,25 @@ def infer_spectrum_type(name: str, meta: Dict[str, str], is_2d: bool) -> str:
     # Refine based on is_2d
     if is_2d:
         if base_type in ['T1', 'T2']:
+             # "2D T1"
             return f"2D {base_type}"
         if base_type == 'Unknown':
             return '2D'
-        # HYSCORE is intrinsically 2D or treated as such? Usually 2D.
-        # Rabi 2D? Rare but possible.
-        if base_type not in ['2D', 'HYSCORE']: # Don't double label "2D 2D"
-             # If user explicitly wants separate types for everything, we can do it.
-             # User asked for "2D T1, 2D T2".
+        if base_type == '2D':
+            return '2D'
+            
+        # HYSCORE is intrinsically 2D.
+        if base_type not in ['2D', 'HYSCORE']: 
              return f"2D {base_type}"
-             
+    else:
+        # User uploaded a 1D slice (ypts=1) but named it "...2D..."
+        # We must NOT return '2D' type or frontend crashes looking for zData
+        if base_type == '2D':
+            return 'CW' # Fallback to standard 1D view
+        if '2D' in base_type:
+             # Strip 2D prefix if present?
+             return base_type.replace('2D', '').strip() or 'CW'
+
     return base_type
 
 def axis_vector(meta: Dict[str, str], axis: str, points: int) -> List[float]:
