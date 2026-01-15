@@ -380,13 +380,40 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                 # Check formatting of size (handling potential remaining mismatch)
                 # Ensure we match xpts * ypts for the output spectrum
                 if len(real_data) != total_points_per_input:
-                     # This happens if we have extra data or bad split
-                     # Truncate or pad?
                      if len(real_data) > total_points_per_input:
                          real_data = real_data[:total_points_per_input]
                          imag_data = imag_data[:total_points_per_input]
                 
-                # Suffix for filename if multiple channels
+                # --- Smart Cleaning ---
+                # User Feedback: "Oscillating limits", "Why 2 spectra?".
+                # Often Bruker exports contain noise channels or untuned Imaginary channels.
+                # If we detect Imaginary is NOISY and Real is CLEAN, we zero Imaginary.
+                # If we detect Channel 2 is NOISY and Channel 1 is CLEAN, we drop Channel 2.
+                
+                clean_threshold = 0.05
+                noise_threshold = 0.15
+                
+                # Check Smoothness using a subset
+                check_subset = 1000
+                s_real = get_smoothness(real_data[:check_subset]) if len(real_data) > 0 else 1.0
+                s_imag = get_smoothness(imag_data[:check_subset]) if len(imag_data) > 0 else 1.0
+                
+                # Heuristic 1: Cleaning Imaginary Noise
+                # If Real is smooth (Signal) and Imag is roughness (Noise), zero Imag.
+                if s_real < clean_threshold and s_imag > noise_threshold:
+                    logger.info(f"Smart Cleaning: Zeroing noisy Imaginary part (Real={s_real:.3f}, Imag={s_imag:.3f})")
+                    imag_data = np.zeros_like(real_data)
+                    
+                # Heuristic 2: Dropping Noisy Channels
+                # We can't drop efficiently inside the loop unless we track them.
+                # So we simply mark it good/bad and filter later? 
+                # Or just append and filter at end of function.
+                
+                is_noisy_channel = (s_real > noise_threshold and s_imag > noise_threshold)
+                # If Real is somewhat clean (> clean but < noise), we keep it. 
+                # Only drop if BOTH are trash.
+                
+                # Suffix for filename
                 suffix = f"_ch{idx+1}" if num_datasets > 1 else ""
                 filename_only = base_name.split('/')[-1] + suffix
 
@@ -399,8 +426,6 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                     for k in range(ypts):
                         start_pt = k * xpts
                         end_pt = start_pt + xpts
-                        # Handle case where flattened data structure matches Z-rows
-                        # If Real is [Row1, Row2...], slicing works.
                         z_data.append(real_data[start_pt:end_pt].tolist())
                         
                     spec = Spectrum2D(
@@ -426,8 +451,24 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                         imag_data=imag_data.tolist(),
                         parsed_params=parsed_params
                     )
+                    
+                    # Store quality metric for filtering
+                    spec._quality_score_real = s_real
                     spectra.append(spec)
-                
+            
+            # Post-Processing: Drop noisy secondaries
+            # Only if we have multiple spectra
+            if len(spectra) > 1 and i == num_datasets - 1: # End of datasets loop
+                 # Identify "Best" spectrum
+                 # Filter out spectra where Real smoothness > 0.15 (Noise) IF there is a better one
+                 # But we must be careful not to drop legitimate noisy signals.
+                 # Heuristic: If Spec1 is clean (<0.05) and Spec2 is noisy (>0.2), drop Spec2.
+                 
+                 clean_spectra = [s for s in spectra if getattr(s, '_quality_score_real', 1.0) < noise_threshold]
+                 if clean_spectra and len(clean_spectra) < len(spectra):
+                     logger.info(f"Smart Filtering: Dropping {len(spectra) - len(clean_spectra)} noisy channels.")
+                     spectra = clean_spectra
+
         except Exception as e:
             logger.error(f"Failed to parse {dsc_path}: {e}")
             continue
