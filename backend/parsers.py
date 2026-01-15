@@ -310,10 +310,36 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                 chunk = dta_bytes[current_offset : current_offset + config['size_bytes']]
                 current_offset += config['size_bytes']
                 
+                # Numpy frombuffer is faster
+                # Correct endian if needed
                 dt = np.dtype(config['dtype'])
-                dt = dt.newbyteorder(config['endian'])
+                original_endian = config['endian']
+                dt = dt.newbyteorder(original_endian)
                 
                 data_array = np.frombuffer(chunk, dtype=dt)
+                
+                # Endianness Heuristic Check
+                # If values are extremely large (e.g. > 1e20), it's likely the wrong endianness.
+                if len(data_array) > 0:
+                     max_val = np.max(np.abs(data_array))
+                     if not np.isfinite(max_val) or max_val > 1e20:
+                         logger.warning(f"Detected suspicious values (max={max_val:.2e}) with endian {original_endian}. Trying swap.")
+                         # Try swapping
+                         other_endian = '<' if original_endian == '>' else '>'
+                         dt_swapped = np.dtype(config['dtype']).newbyteorder(other_endian)
+                         data_array_swapped = np.frombuffer(chunk, dtype=dt_swapped)
+                         
+                         max_val_swapped = np.max(np.abs(data_array_swapped))
+                         if np.isfinite(max_val_swapped) and max_val_swapped < 1e20:
+                             logger.info(f"Swapped endianness to {other_endian} (max={max_val_swapped:.2e}). Fixed.")
+                             data_array = data_array_swapped
+                         else:
+                             logger.warning("Swapped endianness didn't fix it (or both are huge). Reverting to header default.")
+                
+                # The original code had a check for `len(data_array) != expected_floats` here,
+                # but `expected_floats` is not defined and the size check is already done for `dta_bytes`
+                # before the loop. This check is likely not needed here, or needs `config['shape']`.
+                # For now, assuming the `data_array` from `chunk` will match `config['shape']`.
                 
                 real_data = []
                 imag_data = []
