@@ -220,139 +220,150 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
             
             xpts = get_int(meta, 'XPTS')
             ypts = get_int(meta, 'YPTS', 1)
+            total_points_per_input = xpts * ypts
             
-            is_complex = 'CPLX' in get_str(meta, 'IKKF', '') or 'IIFMT' in meta
+            # Metadata descriptors can be comma-separated lists for multiple datasets (channels)
+            ikkf_list = get_str(meta, 'IKKF', 'CPLX').split(',')
+            irfmt_list = get_str(meta, 'IRFMT', 'F').split(',')
             
-            # Format
-            irfmt = get_str(meta, 'IRFMT', 'F')
-            if 'D' in irfmt:
-                dtype = np.float64
-                sample_size = 8
-            elif 'I' in irfmt:
-                dtype = np.int32
-                sample_size = 4
-            else:
-                dtype = np.float32 # typical 'F'
-                sample_size = 4
-                
+            # Normalize list lengths
+            num_datasets = max(len(ikkf_list), len(irfmt_list))
+            if len(ikkf_list) < num_datasets: ikkf_list += [ikkf_list[-1]] * (num_datasets - len(ikkf_list))
+            if len(irfmt_list) < num_datasets: irfmt_list += [irfmt_list[-1]] * (num_datasets - len(irfmt_list))
+            
+            # 1. Determine Structure and Total Expected Size
+            dataset_configs = []
+            total_bytes_expected = 0
+            
             bseq = get_str(meta, 'BSEQ', 'BIG')
             endian = '>' if 'BIG' in bseq else '<'
             
-            total_points = xpts * ypts
-            expected_floats = total_points * (2 if is_complex else 1)
-            
-            # Numpy fromfs is faster
-            # Correct endian if needed
-            dt = np.dtype(dtype)
-            dt = dt.newbyteorder(endian)
-            
-            data_array = np.frombuffer(dta_bytes, dtype=dt)
-            
-            if len(data_array) != expected_floats:
-                logger.warning(f"Size mismatch {dsc_path}: got {len(data_array)}, expected {expected_floats}")
+            for i in range(num_datasets):
+                is_cplx = 'CPLX' in ikkf_list[i] or 'IIFMT' in meta
+                fmt_char = irfmt_list[i]
+                
+                if 'D' in fmt_char:
+                    dtype = np.float64
+                    item_size = 8
+                elif 'I' in fmt_char:
+                    dtype = np.int32
+                    item_size = 4
+                else:
+                    dtype = np.float32 # 'F'
+                    item_size = 4
+                    
+                points = total_points_per_input
+                components = 2 if is_cplx else 1
+                size_bytes = points * components * item_size
+                
+                dataset_configs.append({
+                    'is_complex': is_cplx,
+                    'dtype': dtype,
+                    'endian': endian,
+                    'size_bytes': size_bytes,
+                    'shape': points * components
+                })
+                total_bytes_expected += size_bytes
+
+            if len(dta_bytes) != total_bytes_expected:
+                # Fallback: sometimes XPTS/YPTS are wrong, or extra padding?
+                # But strict check prevents garbage.
+                # Special check: if only 1 dataset expected but size is double, assume implicit 2nd channel?
+                # (User Case handled by proper IKKF parsing hopefully)
+                logger.warning(f"Size mismatch {dsc_path}: got {len(dta_bytes)}, expected {total_bytes_expected}")
                 continue
                 
-            real_data = []
-            imag_data = []
+            # 2. Extract Data
+            current_offset = 0
+            x_axis_label_base = f"{get_str(meta, 'XNAM')} ({get_str(meta, 'XUNI')})"
             
-            if is_complex:
-                # Interleaved Real, Imag
-                real_data = data_array[0::2]
-                imag_data = data_array[1::2]
-            else:
-                real_data = data_array
-                imag_data = np.zeros_like(real_data)
-                
-            # Axes
-            x_axis_label = f"{get_str(meta, 'XNAM')} ({get_str(meta, 'XUNI')})"
-            y_axis_label = f"{get_str(meta, 'YNAM')} ({get_str(meta, 'YUNI')})"
-            
+            # Common axes
             x_vector = axis_vector(meta, 'X', xpts)
-            
-            
+            # Apply corrections once
+            # Note: We need infer_spectrum_type first.
             spectrum_type = infer_spectrum_type(base_name, meta, ypts > 1)
             parsed_params = parse_params_from_name(base_name.split('/')[-1])
+            x_vector = normalize_x_for_time_type(x_vector, spectrum_type, x_axis_label_base)
             
-            # Debug Logging
-            logger.info(f"Parsed {base_name}: Type={spectrum_type}, XNAM={get_str(meta, 'XNAM')}, XUNI={get_str(meta, 'XUNI')}, XMIN={get_str(meta, 'XMIN')}, XWID={get_str(meta, 'XWID')}")
-
-            # 1. Zero-correction for Time Domain (T1/T2/Rabi)
-            x_vector = normalize_x_for_time_type(x_vector, spectrum_type, x_axis_label)
-
-            # 2. Unit Standardization (Convert to Gauss if magnetic field)
-            # Handle kG, T, mT -> G
-            # Handle mislabeled EDFS (e.g. 0-14 labeled 'us' -> predict kG -> 14000 G)
-            
-            x_lower = x_axis_label.lower()
-            is_mag_field = 'gauss' in x_lower or 'field' in x_lower or 'G' in x_axis_label or spectrum_type == 'EDFS'
-            
+            # EDFS Correction Logic (Duplicated from original, but clean)
+            x_lower = x_axis_label_base.lower()
+            is_mag_field = 'gauss' in x_lower or 'field' in x_lower or 'G' in x_axis_label_base or spectrum_type == 'EDFS'
             if is_mag_field and x_vector:
-                max_val = max(x_vector)
-                
-                # Case A: Explicit Units
-                if '(T)' in x_axis_label or '(Tesla)' in x_axis_label:
-                    x_vector = [v * 10000 for v in x_vector]
-                    x_axis_label = "Magnetic Field (G)"
-                elif '(mT)' in x_axis_label:
-                    x_vector = [v * 10 for v in x_vector]
-                    x_axis_label = "Magnetic Field (G)"
-                elif '(kG)' in x_axis_label:
-                    x_vector = [v * 1000 for v in x_vector]
-                    x_axis_label = "Magnetic Field (G)"
-                elif '(kg)' in x_lower: # typo handle
+                 max_val = max(x_vector)
+                 if '(T)' in x_axis_label_base or '(Tesla)' in x_axis_label_base:
+                     x_vector = [v * 10000 for v in x_vector]
+                     x_axis_label_base = "Magnetic Field (G)"
+                 elif '(mT)' in x_axis_label_base:
+                     x_vector = [v * 10 for v in x_vector]
+                     x_axis_label_base = "Magnetic Field (G)"
+                 elif '(kG)' in x_axis_label_base or '(kg)' in x_lower:
                      x_vector = [v * 1000 for v in x_vector]
-                     x_axis_label = "Magnetic Field (G)"
+                     x_axis_label_base = "Magnetic Field (G)"
+                 elif spectrum_type == 'EDFS' and max_val <= 20: 
+                     x_vector = [v * 1000 for v in x_vector]
+                     x_axis_label_base = "Magnetic Field (G)"
+                     logger.info(f"Applied EDFS Correction for {base_name}")
 
-                # Case B: EDFS Heuristic for "0 to 14" issue
-                # If EDFS, and range is small (e.g. 0-20), and it's NOT explicitly T/kG (already handled),
-                # AND it might be mislabeled as 'us' or just 'G' but values are kG.
-                elif spectrum_type == 'EDFS':
-                    if max_val <= 20: # 14 fall in here. 14000 does not.
-                        # Assume kG implies 14000 G
-                        x_vector = [v * 1000 for v in x_vector]
-                        x_axis_label = "Magnetic Field (G)"
-                        logger.info(f"Applied EDFS Correction: Scaled x1000 (assuming kG) for {base_name}")
-
-            filename_only = base_name.split('/')[-1]
-
-            if ypts > 1:
-                # 2D Spectrum
-                y_vector = axis_vector(meta, 'Y', ypts)
+            
+            for idx, config in enumerate(dataset_configs):
+                # Slice Buffer
+                chunk = dta_bytes[current_offset : current_offset + config['size_bytes']]
+                current_offset += config['size_bytes']
                 
-                # Reshape Z data
-                # Z data is typically row by row
-                z_data = []
-                for i in range(ypts):
-                    start = i * xpts
-                    end = start + xpts
-                    z_data.append(real_data[start:end].tolist())
-                    
-                spec = Spectrum2D(
-                    filename=filename_only,
-                    type=spectrum_type,
-                    x_label=x_axis_label,
-                    y_label=y_axis_label,
-                    x_data=x_vector,
-                    y_data=y_vector,
-                    z_data=z_data,
-                    parsed_params=parsed_params
-                )
-                spectra.append(spec)
-
+                dt = np.dtype(config['dtype'])
+                dt = dt.newbyteorder(config['endian'])
                 
-            else:
-                # 1D Spectrum
-                spec = Spectrum1D(
-                    filename=filename_only,
-                    type=spectrum_type,
-                    x_label=x_axis_label,
-                    y_label='Intensity (a.u.)',
-                    x_data=x_vector,
-                    real_data=real_data.tolist(),
-                    imag_data=imag_data.tolist(),
-                    parsed_params=parsed_params
-                )
-                spectra.append(spec)
+                data_array = np.frombuffer(chunk, dtype=dt)
+                
+                real_data = []
+                imag_data = []
+                
+                if config['is_complex']:
+                    real_data = data_array[0::2]
+                    imag_data = data_array[1::2]
+                else:
+                    real_data = data_array
+                    imag_data = np.zeros_like(real_data)
+                
+                # Suffix for filename if multiple channels
+                suffix = f"_ch{idx+1}" if num_datasets > 1 else ""
+                filename_only = base_name.split('/')[-1] + suffix
+
+                y_axis_label = f"{get_str(meta, 'YNAM')} ({get_str(meta, 'YUNI')})"
+
+                if ypts > 1:
+                    # 2D Spectrum
+                    y_vector = axis_vector(meta, 'Y', ypts)
+                    z_data = []
+                    for k in range(ypts):
+                        start_pt = k * xpts
+                        end_pt = start_pt + xpts
+                        z_data.append(real_data[start_pt:end_pt].tolist())
+                        
+                    spec = Spectrum2D(
+                        filename=filename_only,
+                        type=spectrum_type,
+                        x_label=x_axis_label_base,
+                        y_label=y_axis_label,
+                        x_data=x_vector,
+                        y_data=y_vector,
+                        z_data=z_data,
+                        parsed_params=parsed_params
+                    )
+                    spectra.append(spec)
+                else:
+                    # 1D Spectrum
+                    spec = Spectrum1D(
+                        filename=filename_only,
+                        type=spectrum_type,
+                        x_label=x_axis_label_base,
+                        y_label='Intensity (a.u.)',
+                        x_data=x_vector,
+                        real_data=real_data.tolist(),
+                        imag_data=imag_data.tolist(),
+                        parsed_params=parsed_params
+                    )
+                    spectra.append(spec)
                 
         except Exception as e:
             logger.error(f"Failed to parse {dsc_path}: {e}")
