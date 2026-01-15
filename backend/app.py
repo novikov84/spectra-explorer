@@ -26,7 +26,7 @@ import parsers
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 * 24 * 60 # 30 days
-UPLOAD_DIR = "/app/data"
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "data")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
