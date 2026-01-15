@@ -10,6 +10,10 @@ from unittest.mock import patch
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient
+
+# Force UPLOAD_DIR to be relative for tests (avoids PermissionError in CI)
+os.environ["UPLOAD_DIR"] = "data"
+
 from app import app, Spectrum1D, SpectrumFileModel
 
 class BackendTests(unittest.TestCase):
