@@ -319,37 +319,72 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                 data_array = np.frombuffer(chunk, dtype=dt)
                 
                 # Endianness Heuristic Check
-                # If values are extremely large (e.g. > 1e20), it's likely the wrong endianness.
+                # ... (Existing Endian check was good, keep it or merge with this?) ...
+                # Actually, let's incorporate the Smoothness Check which is more robust for Structure.
+                
+                def get_smoothness(arr):
+                    if len(arr) < 2: return 0
+                    diffs = np.abs(np.diff(arr))
+                    rng = np.ptp(arr)
+                    if rng == 0: return 0
+                    return np.mean(diffs) / rng
+
+                # 1. First fix Endianness (Magnitude check)
                 if len(data_array) > 0:
                      max_val = np.max(np.abs(data_array))
                      if not np.isfinite(max_val) or max_val > 1e20:
-                         logger.warning(f"Detected suspicious values (max={max_val:.2e}) with endian {original_endian}. Trying swap.")
-                         # Try swapping
+                         logger.warning(f"Detected suspicious values (max={max_val:.2e}) with endian {original_endian}. Swapping.")
                          other_endian = '<' if original_endian == '>' else '>'
                          dt_swapped = np.dtype(config['dtype']).newbyteorder(other_endian)
-                         data_array_swapped = np.frombuffer(chunk, dtype=dt_swapped)
-                         
-                         max_val_swapped = np.max(np.abs(data_array_swapped))
-                         if np.isfinite(max_val_swapped) and max_val_swapped < 1e20:
-                             logger.info(f"Swapped endianness to {other_endian} (max={max_val_swapped:.2e}). Fixed.")
-                             data_array = data_array_swapped
-                         else:
-                             logger.warning("Swapped endianness didn't fix it (or both are huge). Reverting to header default.")
-                
-                # The original code had a check for `len(data_array) != expected_floats` here,
-                # but `expected_floats` is not defined and the size check is already done for `dta_bytes`
-                # before the loop. This check is likely not needed here, or needs `config['shape']`.
-                # For now, assuming the `data_array` from `chunk` will match `config['shape']`.
-                
-                real_data = []
-                imag_data = []
-                
-                if config['is_complex']:
-                    real_data = data_array[0::2]
-                    imag_data = data_array[1::2]
+                         data_array = np.frombuffer(chunk, dtype=dt_swapped)
+
+                # 2. Determine Structure: Interleaved vs Block
+                # We expect Real/Imag components.
+                if config['is_complex'] and len(data_array) >= (xpts * 2):
+                    # Candidate 1: Interleaved (Standard Bruker)
+                    # Real = 0, 2, 4... | Imag = 1, 3, 5...
+                    real_int = data_array[0::2]
+                    imag_int = data_array[1::2]
+                    
+                    # Candidate 2: Block (Sequential)
+                    # Real = 0..N-1 | Imag = N..2N-1
+                    # Note: We need to be careful about total points. 
+                    # If data_array includes multiple channels (which we handled via chunking?), 
+                    # then config['size_bytes'] ensures we only have ONE dataset here.
+                    mid = len(data_array) // 2
+                    real_blk = data_array[:mid]
+                    imag_blk = data_array[mid:]
+                    
+                    # Compute Smoothness
+                    # Use a subset for speed if array is huge
+                    subset = min(len(real_int), 1000)
+                    score_int = get_smoothness(real_int[:subset])
+                    score_blk = get_smoothness(real_blk[:subset])
+                    
+                    logger.info(f"Structure Heuristic: Interleaved={score_int:.4f}, Block={score_blk:.4f}")
+                    
+                    if score_blk < (score_int * 0.5): 
+                        # Block is significantly smoother (2x better)
+                        logger.info("Selecting BLOCK structure based on smoothness.")
+                        real_data = real_blk
+                        imag_data = imag_blk
+                    else:
+                        logger.info("Selecting INTERLEAVED structure (default).")
+                        real_data = real_int
+                        imag_data = imag_int
                 else:
+                    # Non-Complex or weird size
                     real_data = data_array
                     imag_data = np.zeros_like(real_data)
+                
+                # Check formatting of size (handling potential remaining mismatch)
+                # Ensure we match xpts * ypts for the output spectrum
+                if len(real_data) != total_points_per_input:
+                     # This happens if we have extra data or bad split
+                     # Truncate or pad?
+                     if len(real_data) > total_points_per_input:
+                         real_data = real_data[:total_points_per_input]
+                         imag_data = imag_data[:total_points_per_input]
                 
                 # Suffix for filename if multiple channels
                 suffix = f"_ch{idx+1}" if num_datasets > 1 else ""
@@ -364,6 +399,8 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                     for k in range(ypts):
                         start_pt = k * xpts
                         end_pt = start_pt + xpts
+                        # Handle case where flattened data structure matches Z-rows
+                        # If Real is [Row1, Row2...], slicing works.
                         z_data.append(real_data[start_pt:end_pt].tolist())
                         
                     spec = Spectrum2D(
