@@ -334,16 +334,37 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                     filename_only = base_name.split('/')[-1]
                     y_axis_label = f"{get_str(meta, 'YNAM')} ({get_str(meta, 'YUNI')})"
                     
-                    spec = Spectrum1D(
-                        filename=filename_only,
-                        type=spectrum_type,
-                        x_label=x_axis_label_base,
-                        y_label=y_axis_label,
-                        x_data=x_vector,
-                        real_data=real_data.tolist(),
-                        imag_data=imag_data.tolist(),
-                        parsed_params=parsed_params
-                    )
+                    if ypts > 1:
+                        # 2D Spectrum
+                        y_vector = axis_vector(meta, 'Y', ypts)
+                        z_data = []
+                        # Reshape flat real_data into rows (Standard raster order)
+                        for k in range(ypts):
+                            start = k * xpts
+                            end = start + xpts
+                            z_data.append(real_data[start:end].tolist())
+                        
+                        spec = Spectrum2D(
+                            filename=filename_only,
+                            type=spectrum_type,
+                            x_label=x_axis_label_base,
+                            y_label=y_axis_label,
+                            x_data=x_vector,
+                            y_data=y_vector,
+                            z_data=z_data,
+                            parsed_params=parsed_params
+                        )
+                    else:
+                        spec = Spectrum1D(
+                            filename=filename_only,
+                            type=spectrum_type,
+                            x_label=x_axis_label_base,
+                            y_label=y_axis_label,
+                            x_data=x_vector,
+                            real_data=real_data.tolist(),
+                            imag_data=imag_data.tolist(),
+                            parsed_params=parsed_params
+                        )
                     spectra.append(spec)
                     parsed_quad = True
                     
