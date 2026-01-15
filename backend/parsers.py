@@ -363,8 +363,8 @@ def parse_zip_archive(content: bytes) -> Tuple[str, List[Union[Spectrum1D, Spect
                     
                     logger.info(f"Structure Heuristic: Interleaved={score_int:.4f}, Block={score_blk:.4f}")
                     
-                    if score_blk < (score_int * 0.5): 
-                        # Block is significantly smoother (2x better)
+                    if score_blk < score_int: 
+                        # Block is smoother.
                         logger.info("Selecting BLOCK structure based on smoothness.")
                         real_data = real_blk
                         imag_data = imag_blk
