@@ -15,10 +15,13 @@ from fastapi.testclient import TestClient
 os.environ["UPLOAD_DIR"] = "data"
 
 from app import app, Spectrum1D, SpectrumFileModel
+from database import create_db_and_tables
 
 class BackendTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Create Tables explicitly because TestClient(app) doesn't run startup events
+        create_db_and_tables()
         cls.client = TestClient(app)
         cls.username = f"user_{uuid.uuid4()}"
         cls.password = "securepass"
